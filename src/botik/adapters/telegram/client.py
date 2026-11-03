@@ -1,7 +1,7 @@
 """Приём сообщений Telegram.
 
-Каждое новое сообщение пишется в лог. Если на канал подписан ход диалога,
-апдейт уходит и ему. Отправка ответов ещё не подключена.
+Текст, голос и картинки уходят в общий приёмник, тот же, что у MAX.
+Отправка ответов ещё не подключена.
 """
 
 import asyncio
@@ -10,6 +10,7 @@ import logging
 from telegram import Message, Update, User
 from telegram.ext import Application, ContextTypes, MessageHandler, Updater, filters
 
+from botik.app.intake import accept, preview
 from botik.domain.messages import Channel, InboundMessage, OutboundMessage
 from botik.ports.messenger import MessageHandler as InboundHandler
 
@@ -61,16 +62,12 @@ class TelegramMessenger:
         inbound = inbound_message(update)
         if inbound is None or update.message is None or update.effective_user is None:
             return
-        logger.info(
-            "chat=%s user=%s name=%s message=%s %s",
-            inbound.chat_id,
-            inbound.user_id,
-            _user_label(update.effective_user),
-            inbound.message_id,
-            _preview(update.message).replace("\n", " "),
+        await accept(
+            self._handler,
+            inbound,
+            name=_user_label(update.effective_user),
+            preview_text=preview(inbound.text, _tags(update.message)),
         )
-        if self._handler is not None:
-            await self._handler(inbound)
 
 
 def inbound_message(update: Update) -> InboundMessage | None:
@@ -88,26 +85,23 @@ def inbound_message(update: Update) -> InboundMessage | None:
     )
 
 
-def _preview(message: Message) -> str:
-    if message.text:
-        return message.text
-    if message.caption:
-        return message.caption
+def _tags(message: Message) -> list[str]:
+    tags: list[str] = []
     if message.voice:
-        return "<voice>"
+        tags.append("<voice>")
     if message.audio:
-        return "<audio>"
+        tags.append("<audio>")
     if message.video:
-        return "<video>"
+        tags.append("<video>")
     if message.video_note:
-        return "<video_note>"
+        tags.append("<video_note>")
     if message.photo:
-        return "<photo>"
+        tags.append("<photo>")
     if message.document:
-        return "<document>"
+        tags.append("<document>")
     if message.sticker:
-        return "<sticker>"
-    return "<non-text>"
+        tags.append("<sticker>")
+    return tags
 
 
 def _user_label(user: User) -> str:

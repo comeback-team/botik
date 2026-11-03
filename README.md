@@ -8,14 +8,15 @@
 uv sync
 ```
 
-Токен бота положи в файл `.env` рядом с `pyproject.toml`:
+Токены ботов положи в файл `.env` рядом с `pyproject.toml`. Достаточно одного, можно оба:
 
 ```bash
 TELEGRAM_BOT_TOKEN=123456:telegram-token
+MAX_BOT_TOKEN=max-token
 ```
 
 ```bash
 uv run botik
 ```
 
-Напиши боту в личку. Текст сообщения появится в логе процесса. Остановка — Ctrl+C.
+Напиши боту в Telegram или MAX: текст, голосовое или картинку. Строка появится в логе процесса. Остановка — Ctrl+C.

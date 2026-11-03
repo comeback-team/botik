@@ -61,6 +61,7 @@ source = { editable = "." }
 dependencies = [
     { name = "faster-whisper" },
     { name = "gigachat" },
+    { name = "httpx" },
     { name = "noisereduce" },
     { name = "numpy" },
     { name = "pydantic" },
@@ -75,6 +76,7 @@ dependencies = [
 requires-dist = [
     { name = "faster-whisper", specifier = ">=1.0.0" },
     { name = "gigachat", specifier = ">=0.2" },
+    { name = "httpx", specifier = ">=0.28" },
     { name = "noisereduce", specifier = ">=3.0.2" },
     { name = "numpy", specifier = ">=1.24.0" },
     { name = "pydantic", specifier = ">=2.7" },

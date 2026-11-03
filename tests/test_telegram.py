@@ -48,22 +48,22 @@ class TelegramInboundTest(unittest.TestCase):
             seen.append(message)
 
         messenger.subscribe(handler)
-        with self.assertLogs("botik.adapters.telegram.client", level=logging.INFO) as logs:
+        with self.assertLogs("botik.app.intake", level=logging.INFO) as logs:
             asyncio.run(messenger._on_update(_update("привет"), None))
 
         self.assertEqual([message.text for message in seen], ["привет"])
-        self.assertIn("chat=42 user=7 name=@arman message=3 привет", logs.output[0])
+        self.assertIn("telegram chat=42 user=7 name=@arman message=3 привет", logs.output[0])
 
     def test_voice_is_logged_without_fake_text(self) -> None:
         voice = Voice(file_id="file", file_unique_id="uniq", duration=2)
         messenger = TelegramMessenger("token")
         update = _update(text=None, voice=voice)
 
-        with self.assertLogs("botik.adapters.telegram.client", level=logging.INFO) as logs:
+        with self.assertLogs("botik.app.intake", level=logging.INFO) as logs:
             asyncio.run(messenger._on_update(update, None))
 
         self.assertIsNone(inbound_message(update).text)
-        self.assertIn("<voice>", logs.output[0])
+        self.assertIn("telegram chat=42 user=7 name=@arman message=3 <voice>", logs.output[0])
 
 
 if __name__ == "__main__":
