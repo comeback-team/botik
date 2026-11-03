@@ -6,13 +6,17 @@
 
 import asyncio
 import logging
+import tempfile
+from pathlib import Path
 
 from telegram import Message, Update, User
 from telegram.ext import Application, ContextTypes, MessageHandler, Updater, filters
 
 from botik.app.intake import accept, preview
+from botik.app.speech import render_speech
 from botik.domain.messages import Channel, InboundMessage, OutboundMessage
 from botik.ports.messenger import MessageHandler as InboundHandler
+from botik.ports.transcriber import Transcriber
 
 logger = logging.getLogger(__name__)
 
@@ -20,9 +24,10 @@ logger = logging.getLogger(__name__)
 class TelegramMessenger:
     channel = Channel.TELEGRAM
 
-    def __init__(self, token: str | None) -> None:
+    def __init__(self, token: str | None, transcriber: Transcriber | None = None) -> None:
         self._token = token
         self._handler: InboundHandler | None = None
+        self._transcriber = transcriber
 
     @property
     def enabled(self) -> bool:
@@ -58,15 +63,17 @@ class TelegramMessenger:
         raise NotImplementedError("Telegram send is not implemented")
 
     async def _on_update(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        del context
         inbound = inbound_message(update)
         if inbound is None or update.message is None or update.effective_user is None:
             return
+        tags = _tags(update.message)
+        audio = await _audio_path(update.message, context)
+        inbound, tags = await render_speech(inbound, tags, audio, self._transcriber)
         await accept(
             self._handler,
             inbound,
             name=_user_label(update.effective_user),
-            preview_text=preview(inbound.text, _tags(update.message)),
+            preview_text=preview(inbound.text, tags),
         )
 
 
@@ -102,6 +109,26 @@ def _tags(message: Message) -> list[str]:
     if message.sticker:
         tags.append("<sticker>")
     return tags
+
+
+async def _audio_path(message: Message, context: ContextTypes.DEFAULT_TYPE | None) -> Path | None:
+    source = message.voice or message.audio
+    if source is None or context is None:
+        return None
+    suffix = ".ogg" if message.voice is not None else Path(source.file_name or "").suffix.lower()
+    if suffix not in {".ogg", ".oga", ".opus"}:
+        return None
+    handle = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
+    handle.close()
+    path = Path(handle.name)
+    try:
+        tg_file = await context.bot.get_file(source.file_id)
+        await tg_file.download_to_drive(path)
+    except Exception:
+        logger.exception("telegram audio download failed")
+        path.unlink(missing_ok=True)
+        return None
+    return path
 
 
 def _user_label(user: User) -> str:

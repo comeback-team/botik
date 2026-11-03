@@ -2,9 +2,12 @@
 
 import asyncio
 import logging
+import tempfile
 import unittest
+from pathlib import Path
 
 from botik.adapters.max.client import MaxMessenger, parse_update
+from botik.app.intake import preview
 from botik.domain.messages import Channel, InboundMessage
 
 
@@ -47,10 +50,45 @@ class MaxInboundTest(unittest.TestCase):
         parsed = parse_update(update)
         self.assertIsNotNone(parsed)
         assert parsed is not None
-        inbound, _name, shown = parsed
+        inbound, _name, tags = parsed
         self.assertIsNone(inbound.text)
+        shown = preview(inbound.text, tags)
         self.assertEqual(shown, "<voice>")
         self.assertNotIn("secret", shown)
+
+    def test_downloaded_audio_is_forwarded_as_text(self) -> None:
+        class FakeTranscriber:
+            async def transcribe(self, path: Path) -> str:
+                self.path = path
+                return "раз два"
+
+        messenger = MaxMessenger("token", FakeTranscriber())
+        created: list[Path] = []
+
+        async def download(url: str) -> Path:
+            self.assertEqual(url, "https://cdn.example/note.ogg")
+            handle = tempfile.NamedTemporaryFile(suffix=".ogg", delete=False)
+            handle.close()
+            path = Path(handle.name)
+            created.append(path)
+            return path
+
+        messenger._download_audio = download  # type: ignore[method-assign]
+        seen: list[InboundMessage] = []
+
+        async def handler(message: InboundMessage) -> None:
+            seen.append(message)
+
+        messenger.subscribe(handler)
+        update = _update(None, [{"type": "audio", "payload": {"url": "https://cdn.example/note.ogg", "token": "secret"}}])
+        with self.assertLogs("botik.app.intake", level=logging.INFO) as logs:
+            asyncio.run(messenger._on_update(update))
+
+        self.assertEqual(seen[0].text, "раз два")
+        self.assertIsNone(seen[0].voice_path)
+        self.assertIn("max chat=9 user=5 name=@maxuser message=mid1 раз два", logs.output[0])
+        self.assertNotIn("secret", logs.output[0])
+        self.assertFalse(created[0].exists())
 
     def test_voice_without_message_body_is_logged(self) -> None:
         messenger = MaxMessenger("token")

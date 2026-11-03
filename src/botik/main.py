@@ -30,10 +30,15 @@ class App:
 
 def build_app(settings: Settings) -> App:
     storage = MongoStorage(settings.mongo_uri)
+    transcriber = WhisperTranscriber(
+        model_size=settings.whisper_model,
+        language=settings.whisper_language,
+        denoise=settings.whisper_denoise,
+    )
     router = ChannelRouter(
         (
-            TelegramMessenger(settings.telegram_token),
-            MaxMessenger(settings.max_token),
+            TelegramMessenger(settings.telegram_token, transcriber),
+            MaxMessenger(settings.max_token, transcriber),
         )
     )
     executor = EffectExecutor(
@@ -50,11 +55,7 @@ def build_app(settings: Settings) -> App:
         deliveries=storage.deliveries,
         processor=ResponseProcessor(handler_registry()),
         executor=executor,
-        transcriber=WhisperTranscriber(
-            model_size=settings.whisper_model,
-            language=settings.whisper_language,
-            denoise=settings.whisper_denoise,
-        ),
+        transcriber=transcriber,
     )
     return App(router, turns)
 

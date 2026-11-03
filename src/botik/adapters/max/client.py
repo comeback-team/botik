@@ -8,14 +8,17 @@ TLS MAX выпущен Минцифры, поэтому к обычным CA д�
 import asyncio
 import logging
 import ssl
+import tempfile
 from pathlib import Path
 from typing import Any
 
 import httpx
 
 from botik.app.intake import accept, preview
+from botik.app.speech import render_speech
 from botik.domain.messages import Channel, InboundMessage, OutboundMessage
 from botik.ports.messenger import MessageHandler
+from botik.ports.transcriber import Transcriber
 
 logger = logging.getLogger(__name__)
 
@@ -34,9 +37,10 @@ _TAGS = {
 class MaxMessenger:
     channel = Channel.MAX
 
-    def __init__(self, token: str | None) -> None:
+    def __init__(self, token: str | None, transcriber: Transcriber | None = None) -> None:
         self._token = token
         self._handler: MessageHandler | None = None
+        self._transcriber = transcriber
 
     @property
     def enabled(self) -> bool:
@@ -89,15 +93,34 @@ class MaxMessenger:
                     ",".join(sorted(str(key) for key in update)),
                 )
             return
-        inbound, name, shown = parsed
+        inbound, name, tags = parsed
+        if seen is not None and inbound.message_id in seen:
+            return
+        audio = await self._download_audio(audio_url(update))
+        inbound, tags = await render_speech(inbound, tags, audio, self._transcriber)
         if seen is not None:
-            if inbound.message_id in seen:
-                return
             seen.add(inbound.message_id)
-        await accept(self._handler, inbound, name=name, preview_text=shown)
+        await accept(self._handler, inbound, name=name, preview_text=preview(inbound.text, tags))
+
+    async def _download_audio(self, url: str | None) -> Path | None:
+        if not url:
+            return None
+        try:
+            payload, content_type = await _download_audio_bytes(url)
+        except httpx.HTTPError:
+            logger.warning("max audio download failed")
+            return None
+        suffix = _audio_suffix(url, content_type)
+        if suffix is None:
+            logger.warning("max audio format is not ogg/opus")
+            return None
+        handle = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
+        handle.write(payload)
+        handle.close()
+        return Path(handle.name)
 
 
-def parse_update(update: dict[str, Any]) -> tuple[InboundMessage, str, str] | None:
+def parse_update(update: dict[str, Any]) -> tuple[InboundMessage, str, list[str]] | None:
     if update.get("update_type") not in {"message_created", "message_edited"}:
         return None
     message = update.get("message")
@@ -125,7 +148,39 @@ def parse_update(update: dict[str, Any]) -> tuple[InboundMessage, str, str] | No
         user_id=str(sender["user_id"]),
         text=text,
     )
-    return inbound, _user_label(sender), preview(text, _tags(attachments))
+    return inbound, _user_label(sender), _tags(attachments)
+
+
+def audio_url(update: dict[str, Any]) -> str | None:
+    message = update.get("message")
+    body = message.get("body") if isinstance(message, dict) else None
+    attachments = body.get("attachments") if isinstance(body, dict) else None
+    if not isinstance(attachments, list):
+        return None
+    for attachment in attachments:
+        if not isinstance(attachment, dict) or attachment.get("type") not in {"audio", "voice"}:
+            continue
+        payload = attachment.get("payload")
+        url = payload.get("url") if isinstance(payload, dict) else None
+        if isinstance(url, str) and url:
+            return url
+    return None
+
+
+async def _download_audio_bytes(url: str) -> tuple[bytes, str]:
+    async with httpx.AsyncClient(timeout=60, verify=_ssl_context(), follow_redirects=True) as client:
+        response = await client.get(url)
+        response.raise_for_status()
+        return response.content, response.headers.get("content-type", "")
+
+
+def _audio_suffix(url: str, content_type: str) -> str | None:
+    suffix = Path(url.split("?", 1)[0]).suffix.lower()
+    if suffix in {".ogg", ".oga", ".opus"}:
+        return suffix
+    if "ogg" in content_type or "opus" in content_type:
+        return ".ogg"
+    return None
 
 
 def _tags(attachments: list[Any]) -> list[str]:
