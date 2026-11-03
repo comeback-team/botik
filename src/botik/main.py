@@ -16,12 +16,13 @@ from botik.app.router import ChannelRouter
 from botik.app.turn import TurnService
 from botik.config import Settings
 
-logger = logging.getLogger(__name__)
-
 
 class App:
-    def __init__(self, router: ChannelRouter) -> None:
+    def __init__(self, router: ChannelRouter, turns: TurnService) -> None:
         self._router = router
+        # Ход собран, но не подписан на каналы: Mongo и LLM ещё заглушки
+        # и уронили бы каждое входящее. Сейчас Telegram только пишет сообщения в лог.
+        self._turns = turns
 
     async def run(self) -> None:
         await self._router.run()
@@ -55,8 +56,7 @@ def build_app(settings: Settings) -> App:
             denoise=settings.whisper_denoise,
         ),
     )
-    router.bind(turns.handle)
-    return App(router)
+    return App(router, turns)
 
 
 def main() -> None:
