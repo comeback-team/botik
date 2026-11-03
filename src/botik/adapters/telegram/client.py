@@ -1,7 +1,7 @@
-"""Приём сообщений Telegram.
+"""Приём и ответы Telegram.
 
 Текст, голос и картинки уходят в общий приёмник, тот же, что у MAX.
-Отправка ответов ещё не подключена.
+Ответ уходит в тот же чат и ссылается на сообщение человека.
 """
 
 import asyncio
@@ -9,7 +9,7 @@ import logging
 import tempfile
 from pathlib import Path
 
-from telegram import Message, Update, User
+from telegram import Message, ReplyParameters, Update, User
 from telegram.ext import Application, ContextTypes, MessageHandler, Updater, filters
 
 from botik.app.intake import accept, preview
@@ -28,6 +28,7 @@ class TelegramMessenger:
         self._token = token
         self._handler: InboundHandler | None = None
         self._transcriber = transcriber
+        self._bot = None
 
     @property
     def enabled(self) -> bool:
@@ -46,6 +47,7 @@ class TelegramMessenger:
         application = Application.builder().token(self._token).build()
         application.add_handler(MessageHandler(filters.ALL, self._on_update))
         async with application:
+            self._bot = application.bot
             updater = application.updater
             if updater is None:
                 raise RuntimeError("telegram updater is unavailable")
@@ -57,10 +59,20 @@ class TelegramMessenger:
             except asyncio.CancelledError:
                 await _stop(application, updater)
                 raise
+            finally:
+                self._bot = None
 
     async def send(self, message: OutboundMessage) -> None:
-        del message
-        raise NotImplementedError("Telegram send is not implemented")
+        if self._bot is None:
+            raise RuntimeError("telegram bot is not running")
+        reply = None
+        if message.reply_to is not None:
+            reply = ReplyParameters(message_id=int(message.reply_to))
+        await self._bot.send_message(
+            chat_id=message.chat_id,
+            text=message.text,
+            reply_parameters=reply,
+        )
 
     async def _on_update(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         inbound = inbound_message(update)

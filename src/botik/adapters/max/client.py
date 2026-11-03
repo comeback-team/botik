@@ -41,6 +41,7 @@ class MaxMessenger:
         self._token = token
         self._handler: MessageHandler | None = None
         self._transcriber = transcriber
+        self._http: httpx.AsyncClient | None = None
 
     @property
     def enabled(self) -> bool:
@@ -61,27 +62,48 @@ class MaxMessenger:
             timeout=timeout,
             verify=_ssl_context(),
         ) as client:
+            self._http = client
             logger.info("max polling started")
             marker: int | None = None
             seen: set[str] = set()
-            while True:
-                try:
-                    updates, marker = await _fetch(client, marker)
-                except asyncio.CancelledError:
-                    raise
-                except PermissionError:
-                    logger.error("max polling stopped: token rejected")
-                    return
-                except httpx.HTTPError:
-                    logger.exception("max poll failed")
-                    await asyncio.sleep(2)
-                    continue
-                for update in updates:
-                    await self._on_update(update, seen)
+            try:
+                await self._poll(client, marker, seen)
+            finally:
+                self._http = None
+
+    async def _poll(
+        self,
+        client: httpx.AsyncClient,
+        marker: int | None,
+        seen: set[str],
+    ) -> None:
+        while True:
+            try:
+                updates, marker = await _fetch(client, marker)
+            except asyncio.CancelledError:
+                raise
+            except PermissionError:
+                logger.error("max polling stopped: token rejected")
+                return
+            except httpx.HTTPError:
+                logger.exception("max poll failed")
+                await asyncio.sleep(2)
+                continue
+            for update in updates:
+                await self._on_update(update, seen)
 
     async def send(self, message: OutboundMessage) -> None:
-        del message
-        raise NotImplementedError("MAX send is not implemented")
+        if self._http is None:
+            raise RuntimeError("max client is not running")
+        body: dict[str, Any] = {"text": message.text}
+        if message.reply_to:
+            body["link"] = {"type": "reply", "mid": message.reply_to}
+        response = await self._http.post(
+            "/messages",
+            params={"chat_id": int(message.chat_id)},
+            json=body,
+        )
+        response.raise_for_status()
 
     async def _on_update(self, update: dict[str, Any], seen: set[str] | None = None) -> None:
         parsed = parse_update(update)

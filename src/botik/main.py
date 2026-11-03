@@ -12,17 +12,33 @@ from botik.adapters.whisper import WhisperTranscriber
 from botik.app.execute import EffectExecutor
 from botik.app.nginx_service import NginxService
 from botik.app.processor import ResponseProcessor, handler_registry
+from botik.app.intake import forward_to_model
 from botik.app.router import ChannelRouter
 from botik.app.turn import TurnService
 from botik.config import Settings
+from botik.domain.messages import InboundMessage, OutboundMessage
 
 
 class App:
     def __init__(self, router: ChannelRouter, turns: TurnService) -> None:
         self._router = router
-        # Ход собран, но не подписан на каналы: Mongo и LLM ещё заглушки
-        # и уронили бы каждое входящее. Сейчас оба канала только пишут сообщения в лог.
+        # Полный ход не подписан: Mongo ещё заглушка.
+        # Живой маршрут — текст входящего в модель и ответ в тот же чат.
+        router.bind(self._on_message)
         self._turns = turns
+
+    async def _on_message(self, message: InboundMessage) -> None:
+        await forward_to_model(message, self._reply)
+
+    async def _reply(self, message: InboundMessage, text: str) -> None:
+        await self._router.send(
+            message.channel,
+            OutboundMessage(
+                chat_id=message.chat_id,
+                text=text,
+                reply_to=message.message_id,
+            ),
+        )
 
     async def run(self) -> None:
         await self._router.run()
