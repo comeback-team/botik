@@ -78,7 +78,7 @@ async def _ack(message: InboundMessage, send: ReplySender) -> None:
 
 
 def submit_site_request(message: InboundMessage, text: str) -> None:
-    """Собрать запрос, отправить его без схемы и сохранить ответ модели."""
+    """Собрать запрос со схемой, отправить его и сохранить ответ модели."""
 
     try:
         request = build_site_request(text)
@@ -95,8 +95,9 @@ def submit_site_request(message: InboundMessage, text: str) -> None:
     request_path = folder / f"{stem}.json"
     request_path.write_text(_payload(request), encoding="utf-8")
     logger.info("site request file=%s", request_path)
-    answer_path = folder / f"{stem}.reply.txt"
-    answer_path.write_text(complete(request.system, request.user), encoding="utf-8")
+    answer_path = folder / f"{stem}.reply.json"
+    answer = complete(request.system, request.user, response_format=request.response_format)
+    answer_path.write_text(json.dumps(answer, ensure_ascii=False, indent=2), encoding="utf-8")
     logger.info("site reply file=%s", answer_path)
 
 

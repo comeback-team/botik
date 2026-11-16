@@ -45,17 +45,21 @@ class ReplyDeliveryTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             with (
                 patch("botik.app.intake.SITE_REQUESTS_DIR", Path(folder)),
-                patch("botik.app.intake.complete", return_value='{"business_type": "кофейня"}'),
+                patch(
+                    "botik.app.intake.complete",
+                    return_value={"business_type": "кофейня"},
+                ) as complete,
             ):
                 asyncio.run(forward_to_model(_incoming(), send))
             request_path = Path(folder) / "telegram-42-3.json"
-            reply_path = Path(folder) / "telegram-42-3.reply.txt"
+            reply_path = Path(folder) / "telegram-42-3.reply.json"
             payload = json.loads(request_path.read_text(encoding="utf-8"))
-            reply = reply_path.read_text(encoding="utf-8")
+            reply = json.loads(reply_path.read_text(encoding="utf-8"))
 
         self.assertEqual(sent, [("42", "3", "all ok")])
         self.assertIn("привет", payload["user"])
-        self.assertEqual(reply, '{"business_type": "кофейня"}')
+        self.assertEqual(reply, {"business_type": "кофейня"})
+        self.assertEqual(complete.call_args.kwargs["response_format"]["type"], "json_schema")
 
     def test_telegram_send_quotes_the_incoming_message(self) -> None:
         messenger = TelegramMessenger("token")

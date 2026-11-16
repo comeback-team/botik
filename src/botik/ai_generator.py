@@ -4,11 +4,15 @@
 """
 
 import base64
+import json
+import logging
 import os
+import re
 from typing import Any
 
 from dotenv import load_dotenv
 from gigachat import GigaChat
+from gigachat.exceptions import BadRequestError, UnprocessableEntityError
 from gigachat.models import Chat, Messages, MessagesRole
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -16,6 +20,9 @@ _SCOPE = "GIGACHAT_API_PERS"
 _MODEL = "GigaChat-2"
 _TIMEOUT = 120.0
 _SITE_MAX_TOKENS = 6000
+_JSON_FENCE = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL)
+
+logger = logging.getLogger(__name__)
 
 
 class Action(BaseModel):
@@ -52,23 +59,63 @@ def ask(prompt: str, structured_output: type[BaseModel] | None = None) -> BaseMo
     return parsed
 
 
-def complete(system: str, user: str) -> str:
-    """Отправить system и user без structured output и вернуть текст ответа."""
+def complete(
+    system: str,
+    user: str,
+    *,
+    response_format: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Отправить system и user и вернуть ответ модели как словарь.
+
+    response_format — плоская JSON Schema, как в blocks1.
+    """
 
     client = _client()
     try:
-        completion = client.chat(
-            Chat(
-                messages=[
-                    Messages(role=MessagesRole.SYSTEM, content=system),
-                    Messages(role=MessagesRole.USER, content=user),
-                ],
-                max_tokens=_SITE_MAX_TOKENS,
-            )
-        )
+        try:
+            raw = _text(client.chat(_chat(system, user, response_format)))
+        except (BadRequestError, UnprocessableEntityError):
+            if response_format is None or response_format.get("type") != "json_schema":
+                raise
+            logger.warning("GigaChat отклонил json_schema, повтор с json_object")
+            raw = _text(client.chat(_chat(system, user, {"type": "json_object"})))
     finally:
         client.close()
-    choices = completion.choices or []
+    return parse_json(raw)
+
+
+def _chat(system: str, user: str, response_format: dict[str, Any] | None) -> Chat:
+    payload: dict[str, Any] = {
+        "messages": [
+            Messages(role=MessagesRole.SYSTEM, content=system),
+            Messages(role=MessagesRole.USER, content=user),
+        ],
+        "max_tokens": _SITE_MAX_TOKENS,
+    }
+    if response_format is not None:
+        payload["response_format"] = response_format
+    return Chat.model_validate(payload)
+
+
+def parse_json(raw: str) -> dict[str, Any]:
+    """Достать объект из ответа: чистый JSON или блок ```json."""
+
+    text = raw.strip()
+    fenced = _JSON_FENCE.search(text)
+    if fenced:
+        text = fenced.group(1).strip()
+    if not text.startswith("{"):
+        start, end = text.find("{"), text.rfind("}")
+        if start != -1 and end > start:
+            text = text[start : end + 1]
+    data = json.loads(text)
+    if not isinstance(data, dict):
+        raise ValueError("Ожидался JSON-объект")
+    return data
+
+
+def _text(completion: Any) -> str:
+    choices = getattr(completion, "choices", None) or []
     if not choices:
         return ""
     return choices[0].message.content or ""

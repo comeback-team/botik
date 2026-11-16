@@ -3,6 +3,7 @@
 import json
 import unittest
 
+from botik.ai_generator import _chat, parse_json
 from botik.site.request import build_site_request
 from botik.site.structure import SiteStructure
 
@@ -69,6 +70,19 @@ class SiteRequestTest(unittest.TestCase):
 
         self.assertEqual([block.type for block in site.blocks], ["header", "hero", "interactive", "footer"])
         self.assertEqual(site.blocks[0].logo_text, "Зерно")
+
+    def test_chat_payload_carries_the_flat_schema(self) -> None:
+        request = build_site_request("Кофейня у дома")
+        chat = _chat(request.system, request.user, request.response_format)
+        attached = chat.response_format.model_dump(by_alias=True)
+
+        self.assertEqual(attached["type"], "json_schema")
+        self.assertNotIn("$ref", json.dumps(attached["schema"]))
+        self.assertEqual([message.role for message in chat.messages], ["system", "user"])
+
+    def test_parse_json_reads_an_object_from_a_fence(self) -> None:
+        raw = 'Готово:\n```json\n{"business_type": "кофейня"}\n```'
+        self.assertEqual(parse_json(raw), {"business_type": "кофейня"})
 
 
 if __name__ == "__main__":
