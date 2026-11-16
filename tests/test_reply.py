@@ -1,12 +1,14 @@
 """Ответ модели возвращается в чат человека, который написал сообщение."""
 
 import asyncio
+import json
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from botik.adapters.max.client import MaxMessenger
 from botik.adapters.telegram.client import TelegramMessenger
-from botik.ai_generator import AssistantReply
 from botik.app.intake import forward_to_model
 from botik.domain.messages import Channel, InboundMessage, OutboundMessage
 
@@ -29,10 +31,31 @@ class ReplyDeliveryTest(unittest.TestCase):
         async def send(message: InboundMessage, text: str) -> None:
             sent.append((message.chat_id, message.message_id, text))
 
-        with patch("botik.app.intake.ask", return_value=AssistantReply(reply="здравствуй")):
+        with patch("botik.app.intake.submit_site_request"):
             asyncio.run(forward_to_model(_incoming(), send))
 
-        self.assertEqual(sent, [("42", "3", "здравствуй")])
+        self.assertEqual(sent, [("42", "3", "all ok")])
+
+    def test_user_text_is_saved_as_a_site_request(self) -> None:
+        sent: list[tuple[str, str]] = []
+
+        async def send(message: InboundMessage, text: str) -> None:
+            sent.append((message.chat_id, message.message_id, text))
+
+        with tempfile.TemporaryDirectory() as folder:
+            with (
+                patch("botik.app.intake.SITE_REQUESTS_DIR", Path(folder)),
+                patch("botik.app.intake.complete", return_value='{"business_type": "кофейня"}'),
+            ):
+                asyncio.run(forward_to_model(_incoming(), send))
+            request_path = Path(folder) / "telegram-42-3.json"
+            reply_path = Path(folder) / "telegram-42-3.reply.txt"
+            payload = json.loads(request_path.read_text(encoding="utf-8"))
+            reply = reply_path.read_text(encoding="utf-8")
+
+        self.assertEqual(sent, [("42", "3", "all ok")])
+        self.assertIn("привет", payload["user"])
+        self.assertEqual(reply, '{"business_type": "кофейня"}')
 
     def test_telegram_send_quotes_the_incoming_message(self) -> None:
         messenger = TelegramMessenger("token")
