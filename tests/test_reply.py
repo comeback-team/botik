@@ -13,6 +13,34 @@ from botik.app.intake import forward_to_model
 from botik.domain.messages import Channel, InboundMessage, OutboundMessage
 
 
+def _site_instruction() -> dict:
+    return {
+        "business_type": "кофейня",
+        "tone": "тёплый",
+        "colors": {"primary": "#112233", "secondary": "#445566"},
+        "blocks": [
+            {"type": "header", "logo_text": "Зерно", "menu": ["Меню", "Контакты"]},
+            {"type": "hero", "title": "Кофе у дома"},
+            {
+                "type": "interactive",
+                "title": "Заказ",
+                "submit_action": "send_lead",
+                "components": [
+                    {"type": "text_input", "id": "phone_number", "label": "Телефон"},
+                    {
+                        "type": "action_button",
+                        "id": "submit_order",
+                        "label": "Отправить",
+                        "action_type": "submit",
+                        "target_endpoint": "/api/leads",
+                    },
+                ],
+            },
+            {"type": "footer"},
+        ],
+    }
+
+
 def _incoming() -> InboundMessage:
     return InboundMessage(
         channel=Channel.TELEGRAM,
@@ -47,18 +75,22 @@ class ReplyDeliveryTest(unittest.TestCase):
                 patch("botik.app.intake.SITE_REQUESTS_DIR", Path(folder)),
                 patch(
                     "botik.app.intake.complete",
-                    return_value={"business_type": "кофейня"},
+                    return_value=_site_instruction(),
                 ) as complete,
             ):
                 asyncio.run(forward_to_model(_incoming(), send))
             request_path = Path(folder) / "telegram-42-3.json"
             reply_path = Path(folder) / "telegram-42-3.reply.json"
+            site_path = Path(folder) / "telegram-42-3.html"
             payload = json.loads(request_path.read_text(encoding="utf-8"))
             reply = json.loads(reply_path.read_text(encoding="utf-8"))
+            html = site_path.read_text(encoding="utf-8")
 
         self.assertEqual(sent, [("42", "3", "all ok")])
         self.assertIn("привет", payload["user"])
-        self.assertEqual(reply, {"business_type": "кофейня"})
+        self.assertEqual(reply["business_type"], "кофейня")
+        self.assertIn("Кофейня", html)
+        self.assertIn("Заказ", html)
         self.assertEqual(complete.call_args.kwargs["response_format"]["type"], "json_schema")
 
     def test_telegram_send_quotes_the_incoming_message(self) -> None:

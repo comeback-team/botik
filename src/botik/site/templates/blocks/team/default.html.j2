@@ -1,0 +1,17 @@
+<section id="s{{ idx }}" class="py-14 md:py-20 px-4 bg-base-200">
+  <div class="max-w-6xl mx-auto">
+    <h2 class="font-display text-2xl md:text-4xl font-bold text-center mb-10">{{ block.title }}</h2>
+    <div class="grid sm:grid-cols-2 lg:grid-cols-4 gap-6">
+      {% for person in block.items %}
+      <div class="card bg-base-100 shadow-md">
+        <div class="card-body items-center text-center gap-2">
+          <div class="w-20 h-20 rounded-full bg-gradient-to-br from-primary to-secondary text-primary-content font-display text-3xl font-extrabold flex items-center justify-center shadow-lg">{{ person.name[:1] }}</div>
+          <h3 class="font-semibold text-lg mt-2">{{ person.name }}</h3>
+          <p class="text-primary text-sm font-medium">{{ person.role }}</p>
+          {% if person.bio %}<p class="text-sm opacity-70 leading-relaxed">{{ person.bio }}</p>{% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</section>

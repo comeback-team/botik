@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="{{ 'dark' if (theme.dark is defined and theme.dark) else 'light' }}">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{ title }}</title>
+{% if theme.fonts_url is defined %}
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link id="tone-fonts" href="{{ theme.fonts_url }}" rel="stylesheet">
+{% endif %}
+<link href="https://cdn.jsdelivr.net/npm/daisyui@4.12.14/dist/full.min.css" rel="stylesheet" type="text/css">
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config = {
+theme: { extend: { colors: {
+primary: "hsl(var(--p) / <alpha-value>)",
+"primary-content": "hsl(var(--pc) / <alpha-value>)",
+secondary: "hsl(var(--s) / <alpha-value>)",
+"secondary-content": "hsl(var(--sc) / <alpha-value>)",
+accent: "hsl(var(--a) / <alpha-value>)",
+"accent-content": "hsl(var(--ac) / <alpha-value>)",
+"base-100": "hsl(var(--b1) / <alpha-value>)",
+"base-200": "hsl(var(--b2) / <alpha-value>)",
+"base-300": "hsl(var(--b3) / <alpha-value>)",
+"base-content": "hsl(var(--bc) / <alpha-value>)",
+neutral: "hsl(var(--n) / <alpha-value>)",
+"neutral-content": "hsl(var(--nc) / <alpha-value>)"
+}}}
+};
+</script>
+{% if theme.vars is defined %}
+{% set v = theme.vars() %}
+{% set radius = theme.radius %}
+{% else %}
+{% set v = {'p': theme.primary, 'pc': theme.primary_content, 's': theme.secondary, 'sc': theme.secondary_content} %}
+{% set radius = 12 %}
+{% endif %}
+<style>
+[data-theme] {
+--p: {{ v.p }}; --pc: {{ v.pc }}; --s: {{ v.s }}; --sc: {{ v.sc }};
+--a: {{ v.a if v.a is defined else v.p }}; --ac: {{ v.ac if v.ac is defined else v.pc }};
+--b1: {{ v.b1 if v.b1 is defined else '0 0% 100%' }};
+--b2: {{ v.b2 if v.b2 is defined else '220 14% 96%' }};
+--b3: {{ v.b3 if v.b3 is defined else '220 13% 91%' }};
+--bc: {{ v.bc if v.bc is defined else '220 20% 16%' }};
+--n: {{ v.n if v.n is defined else '220 20% 16%' }};
+--nc: {{ v.nc if v.nc is defined else '0 0% 100%' }};
+--rounded-btn: {{ radius }}px; --rounded-box: {{ radius + 4 }}px;
+}
+html { scroll-behavior: smooth; scrollbar-width: thin; scrollbar-color: hsl(var(--p)) hsl(var(--b2)); }
+body {
+margin: 0; max-width: 100%; overflow-x: hidden; overflow-x: clip;
+font-family: {{ (theme.font_body if theme.font_body is defined else 'ui-sans-serif, system-ui, sans-serif') | safe }};
+}
+h1, h2, h3, .font-display {
+font-family: {{ (theme.font_display if theme.font_display is defined else 'inherit') | safe }};
+}
+
+/* ===== НИЧЕГО НЕ ОБРЕЗАЕТСЯ ===== */
+*, *::before, *::after { min-width: 0; }
+h1, h2, h3, h4, p, li, a, span, div, label, td, th { overflow-wrap: break-word; }
+h1, h2, h3, .card-title, .stat-value, .stat-desc, .collapse-title, .menu a, .badge, .btn {
+overflow-wrap: anywhere;
+}
+.btn {
+height: auto; min-height: 2.75rem; white-space: normal; line-height: 1.25;
+padding-top: .55rem; padding-bottom: .55rem; text-align: center;
+}
+.btn-sm { min-height: 2.25rem; }
+.btn-lg { min-height: 3.5rem; }
+.btn-square, .btn-circle { width: 2.75rem; height: 2.75rem; min-height: 2.75rem; padding: 0; }
+.badge {
+height: auto; min-height: 1.5rem; white-space: normal; line-height: 1.2;
+padding-top: .3rem; padding-bottom: .3rem;
+}
+.card-title { flex-wrap: wrap; }
+.navbar { flex-wrap: wrap; row-gap: .25rem; }
+.navbar-start, .navbar-end { min-width: 0; max-width: 100%; }
+.menu a { white-space: normal; }
+.hero-content { flex-wrap: wrap; width: 100%; max-width: 100%; }
+.stats { max-width: 100%; }
+.stat { min-width: 0; }
+section, header, footer, .hero, .navbar, .card { max-width: 100%; }
+img, svg, video, canvas { max-width: 100%; height: auto; }
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: hsl(var(--b2)); }
+::-webkit-scrollbar-thumb { background: hsl(var(--p)); border-radius: 8px; border: 2px solid hsl(var(--b2)); }
+::-webkit-scrollbar-thumb:hover { background: hsl(var(--s)); }
+{% if theme.extra_css is defined %}{{ theme.extra_css | safe }}{% endif %}
+[id^="s"] { scroll-margin-top: 5.5rem; }
+</style>
+</head>
+<body class="bg-base-100 text-base-content antialiased">
+{% for block_html in blocks_html %}{{ block_html | safe }}{% endfor %}
+<div id="a2ui-config" hidden data-site-id="{{ site_id }}" data-api-base="{{ api_base }}" data-demo="{{ 'true' if demo else 'false' }}"></div>
+<script>{{ runtime_js | safe }}</script>
+</body>
+</html>

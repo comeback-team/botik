@@ -1,0 +1,14 @@
+<section id="s{{ idx }}" class="hero min-h-[70vh] bg-gradient-to-br from-primary to-secondary text-primary-content">
+  <div class="hero-content text-center py-16 md:py-24 w-full max-w-full">
+    <div class="max-w-2xl min-w-0 w-full">
+      <h1 class="text-3xl sm:text-4xl md:text-6xl font-extrabold leading-tight [overflow-wrap:anywhere]">{{ block.title }}</h1>
+      {% if block.subtitle %}<p class="py-6 text-base md:text-lg opacity-90 [overflow-wrap:anywhere]">{{ block.subtitle }}</p>{% endif %}
+      {% if block.highlights %}
+      <div class="flex flex-wrap justify-center gap-2 mb-8">
+        {% for h in block.highlights %}<span class="badge badge-lg bg-base-100/20 border-base-100/40 text-primary-content">{{ h }}</span>{% endfor %}
+      </div>
+      {% endif %}
+      <a href="{{ cta_anchor }}" class="btn btn-lg bg-base-100 text-base-content border-none hover:scale-105 transition-transform whitespace-normal h-auto py-3 max-w-full">{{ block.cta_text }}</a>
+    </div>
+  </div>
+</section>

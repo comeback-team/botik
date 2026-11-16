@@ -1,0 +1,7 @@
+<section id="s{{ idx }}" class="px-4 py-12 md:py-16">
+  <div class="max-w-6xl mx-auto rounded-box bg-gradient-to-br from-primary to-secondary text-primary-content p-8 md:p-14 text-center shadow-xl">
+    <h2 class="font-display text-3xl md:text-5xl font-extrabold leading-tight">{{ block.title }}</h2>
+    {% if block.subtitle %}<p class="mt-4 opacity-90 max-w-2xl mx-auto text-base md:text-lg">{{ block.subtitle }}</p>{% endif %}
+    <a href="{{ cta_anchor }}" class="btn btn-lg mt-8 bg-base-100 text-base-content border-none hover:scale-105 transition-transform">{{ block.button_text }}</a>
+  </div>
+</section>

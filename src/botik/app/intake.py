@@ -9,6 +9,7 @@ from pathlib import Path
 from botik.ai_generator import complete
 from botik.domain.messages import InboundMessage
 from botik.ports.messenger import MessageHandler
+from botik.site.render import render_instruction
 from botik.site.request import SiteRequest, build_site_request
 
 ReplySender = Callable[[InboundMessage, str], Awaitable[None]]
@@ -99,6 +100,9 @@ def submit_site_request(message: InboundMessage, text: str) -> None:
     answer = complete(request.system, request.user, response_format=request.response_format)
     answer_path.write_text(json.dumps(answer, ensure_ascii=False, indent=2), encoding="utf-8")
     logger.info("site reply file=%s", answer_path)
+    site_path = folder / f"{stem}.html"
+    site_path.write_text(render_instruction(answer, site_id=stem), encoding="utf-8")
+    logger.info("site file=%s", site_path)
 
 
 def _payload(request: SiteRequest) -> str:

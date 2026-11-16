@@ -1,0 +1,23 @@
+<section id="s{{ idx }}" class="py-14 md:py-20 px-4 bg-base-200">
+  <div class="max-w-6xl mx-auto">
+    <h2 class="font-display text-2xl md:text-4xl font-bold text-center mb-10">{{ block.title }}</h2>
+    <div class="grid md:grid-cols-2 xl:grid-cols-4 gap-5 items-stretch">
+      {% for plan in block.items %}
+      <div class="card bg-base-100 shadow-md relative {{ 'border-2 border-primary shadow-xl' if plan.highlighted }}">
+        {% if plan.highlighted %}<div class="badge badge-primary absolute -top-3 left-1/2 -translate-x-1/2">Хит</div>{% endif %}
+        <div class="card-body gap-3">
+          <h3 class="card-title text-lg">{{ plan.name }}</h3>
+          <div class="flex items-baseline gap-1">
+            <span class="font-display text-4xl font-extrabold text-primary">{{ plan.price }}</span>
+            {% if plan.period %}<span class="text-sm opacity-60">{{ plan.period }}</span>{% endif %}
+          </div>
+          <ul class="text-sm space-y-2 opacity-80">
+            {% for f in plan.features %}<li class="flex gap-2"><span class="text-primary">✓</span>{{ f }}</li>{% endfor %}
+          </ul>
+          <a href="{{ cta_anchor }}" class="btn {{ 'btn-primary' if plan.highlighted else 'btn-outline' }} btn-block mt-auto">{{ plan.cta_text }}</a>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</section>

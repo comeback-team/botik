@@ -1,0 +1,16 @@
+<section id="s{{ idx }}" class="py-14 md:py-20 px-4 bg-base-200">
+  <div class="max-w-6xl mx-auto">
+    <h2 class="text-2xl md:text-4xl font-bold text-center mb-10 [overflow-wrap:anywhere]">{{ block.title }}</h2>
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+      {% for item in block.items %}
+      <div class="card bg-base-100 shadow-md hover:shadow-xl transition-shadow">
+        <div class="card-body">
+          <div class="badge badge-primary badge-outline w-fit">{{ loop.index }}</div>
+          <h3 class="card-title text-lg [overflow-wrap:anywhere]">{{ item.title }}</h3>
+          <p class="text-sm md:text-base opacity-75 [overflow-wrap:anywhere]">{{ item.description }}</p>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</section>

@@ -1,0 +1,14 @@
+<section id="s{{ idx }}" class="py-14 md:py-20 px-4">
+  <div class="max-w-3xl mx-auto">
+    <h2 class="text-2xl md:text-4xl font-bold mb-8 [overflow-wrap:anywhere]">{{ block.title }}</h2>
+    <div class="join join-vertical w-full">
+      {% for item in block.items %}
+      <div class="collapse collapse-arrow join-item border border-base-300 bg-base-100">
+        <input type="radio" name="faq-{{ idx }}" {% if loop.first %}checked{% endif %}>
+        <div class="collapse-title font-medium whitespace-normal [overflow-wrap:anywhere]">{{ item.question }}</div>
+        <div class="collapse-content text-sm md:text-base opacity-80"><p class="[overflow-wrap:anywhere]">{{ item.answer }}</p></div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</section>

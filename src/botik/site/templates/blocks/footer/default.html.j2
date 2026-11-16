@@ -1,0 +1,14 @@
+<footer id="s{{ idx }}" class="footer footer-center p-10 bg-neutral text-neutral-content">
+  <aside class="min-w-0 max-w-full">
+    <p class="font-bold text-lg [overflow-wrap:anywhere]">{{ business_name }}</p>
+    {% if block.phone %}<p class="[overflow-wrap:anywhere]">{{ block.phone }}</p>{% endif %}
+    {% if block.email %}<p class="[overflow-wrap:anywhere]">{{ block.email }}</p>{% endif %}
+    {% if block.address %}<p class="[overflow-wrap:anywhere]">{{ block.address }}</p>{% endif %}
+    <p class="opacity-60 text-sm">Сайт собран на A2UI-платформе</p>
+  </aside>
+  {% if block.socials %}
+  <nav><div class="grid grid-flow-col gap-3">
+    {% for s in block.socials %}<span class="badge badge-ghost">{{ s }}</span>{% endfor %}
+  </div></nav>
+  {% endif %}
+</footer>

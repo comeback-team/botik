@@ -4,6 +4,7 @@ import json
 import unittest
 
 from botik.ai_generator import _chat, parse_json
+from botik.site.render import render_instruction
 from botik.site.request import build_site_request
 from botik.site.structure import SiteStructure
 
@@ -83,6 +84,40 @@ class SiteRequestTest(unittest.TestCase):
     def test_parse_json_reads_an_object_from_a_fence(self) -> None:
         raw = 'Готово:\n```json\n{"business_type": "кофейня"}\n```'
         self.assertEqual(parse_json(raw), {"business_type": "кофейня"})
+
+    def test_incomplete_instruction_still_renders(self) -> None:
+        html = render_instruction(
+            {
+                "business_type": "автосервис",
+                "tone": "деловой",
+                "colors": {"primary": "#112233", "secondary": "#445566"},
+                "blocks": [
+                    {"type": "header"},
+                    {"type": "hero", "variant": "split"},
+                    {"type": "text", "title": "О нас", "body": "Ремонт машин."},
+                    {
+                        "type": "interactive",
+                        "title": "Запись",
+                        "submit_action": "book_diagnostic",
+                        "components": [
+                            {"type": "text_input", "id": "phone_number", "label": "Телефон"},
+                            {
+                                "type": "action_button",
+                                "id": "submit_booking",
+                                "label": "Записаться",
+                                "action_type": "submit",
+                                "target_endpoint": "/api/booking/diagnostic",
+                            },
+                        ],
+                    },
+                    {"type": "footer"},
+                ],
+            },
+            site_id="demo",
+        )
+        self.assertIn("Автосервис", html)
+        self.assertIn("Ремонт машин.", html)
+        self.assertIn('id="s1"', html)
 
 
 if __name__ == "__main__":

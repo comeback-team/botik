@@ -1,0 +1,16 @@
+<section id="s{{ idx }}" class="py-14 md:py-20 px-4 bg-base-200">
+  <div class="max-w-6xl mx-auto">
+    <h2 class="font-display text-2xl md:text-4xl font-bold text-center mb-10">{{ block.title }}</h2>
+    <div class="grid sm:grid-cols-2 lg:grid-cols-4 gap-6">
+      {% for item in block.items %}
+      <div class="flex lg:flex-col gap-4 items-start">
+        <div class="w-12 h-12 shrink-0 rounded-full bg-primary text-primary-content font-display text-xl font-extrabold flex items-center justify-center shadow-lg">{{ loop.index }}</div>
+        <div>
+          <h3 class="font-semibold text-lg">{{ item.title }}</h3>
+          {% if item.description %}<p class="text-sm opacity-75 mt-1 leading-relaxed">{{ item.description }}</p>{% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</section>
