@@ -6,7 +6,10 @@ services:
     # env_file:
     #   - .env
     ports:
-      - "8080:8080"
+      - 8080:8080
+    volumes:
+      - content:/app/content
+      - nginx-rules:/app/nginx-rules
   
   nginx:
     image: nginx:1.31-alpine
@@ -15,4 +18,14 @@ services:
     depends_on:
       - botik
     ports:
-      - "80:80"
+      - 80:80
+      - 443:443
+    volumes:
+      - nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - content:/var/www/content:ro
+      - nginx-rules:/etc/nginx/nginx-rules:ro
+
+
+volumes:
+  content:
+  nginx-rules:
