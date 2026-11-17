@@ -1,11 +1,13 @@
-FROM ghcr.io/astral-sh/uv:python3.15-alpine
+FROM ghcr.io/astral-sh/uv:python3.12-trixie-slim
 
 WORKDIR /app
 
-COPY pyproject.toml uv.lock README.md ./
+RUN apt update -y && apt install ffmpeg -y
 
-RUN uv sync --locked --no-dev
+COPY pyproject.toml uv.lock README.md ./
+RUN uv sync --locked --no-dev --no-install-project
 
 COPY . .
+RUN uv sync --locked --no-dev
 
 CMD ["uv", "run", "botik"]
