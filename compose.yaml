@@ -12,7 +12,8 @@ services:
       - nginx-rules:/app/nginx-rules
   
   nginx:
-    image: nginx:1.31-alpine
+    build: nginx
+    image: botik-nginx
     container_name: botik-nginx
     restart: unless-stopped
     depends_on:
@@ -21,7 +22,7 @@ services:
       - 80:80
       - 443:443
     volumes:
-      - nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - content:/var/www/content:ro
       - nginx-rules:/etc/nginx/nginx-rules:ro
 
