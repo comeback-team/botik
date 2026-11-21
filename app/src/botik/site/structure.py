@@ -5,15 +5,19 @@
 """
 
 import re
-_TOKEN_OR_URL_RE = re.compile(
-    r"^(\{\{(img|photo|image):\d+\}\}|https?://\S+|/media/\S+)$"
+
+_IMAGE_REF_RE = re.compile(
+    r"^(\{\{(img|photo|image):\d+\}\}|/media/[a-zA-Z0-9_.\-]{1,128})$"
 )
 
 
 def _clean_image_url(value: str) -> str:
-    """Пропускает токен, http(s)-ссылку или наш /media/...; выдуманные URL гасит."""
+    """Только токен или наша ссылка /media/....
+    модель ссылки не носит, поэтому
+    «искажённый хвост» под \\S+ пройти валидацию не может.
+    /media/... появляется только после нашей подстановки токенов."""
     value = (value or "").strip()
-    return value if _TOKEN_OR_URL_RE.match(value) else ""
+    return value if _IMAGE_REF_RE.match(value) else ""
     
 from enum import StrEnum
 from typing import Annotated, Any, Literal, Union
