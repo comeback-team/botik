@@ -42,6 +42,8 @@ class MaxInboundTest(unittest.TestCase):
             asyncio.run(messenger._on_update(update))
 
         self.assertEqual(seen[0].channel, Channel.MAX)
+        self.assertEqual(seen[0].chat_id, "9")
+        self.assertEqual(seen[0].user_id, "5")
         self.assertEqual(seen[0].text, "смотри")
         self.assertIn("max chat=9 user=5 name=@maxuser message=mid1 смотри <photo>", logs.output[0])
 

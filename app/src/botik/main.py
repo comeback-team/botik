@@ -17,17 +17,32 @@ from botik.app.router import ChannelRouter
 from botik.app.turn import TurnService
 from botik.config import Settings
 from botik.domain.messages import InboundMessage, OutboundMessage
+from botik.ports.repos import DialogueRepository
 
 
 class App:
-    def __init__(self, router: ChannelRouter, turns: TurnService) -> None:
+    def __init__(
+        self,
+        router: ChannelRouter,
+        turns: TurnService,
+        dialogues: DialogueRepository,
+    ) -> None:
         self._router = router
-        # Полный ход не подписан: Mongo ещё заглушка.
-        # Живой маршрут — текст входящего в модель и ответ в тот же чат.
+        self._dialogues = dialogues
+        # Полный ход с инструментами не подписан.
+        # Живой маршрут — диалог в Mongo, затем текст входящего в модель.
         router.bind(self._on_message)
         self._turns = turns
 
     async def _on_message(self, message: InboundMessage) -> None:
+        try:
+            await self._dialogues.ensure(message)
+        except Exception:
+            logging.getLogger(__name__).exception(
+                "dialogue ensure failed channel=%s chat=%s",
+                message.channel.value,
+                message.chat_id,
+            )
         await forward_to_model(message, self._reply)
 
     async def _reply(self, message: InboundMessage, text: str) -> None:
@@ -73,7 +88,7 @@ def build_app(settings: Settings) -> App:
         executor=executor,
         transcriber=transcriber,
     )
-    return App(router, turns)
+    return App(router, turns, storage.dialogues)
 
 
 def main() -> None:
