@@ -98,7 +98,7 @@ class MongoDialogues:
                     "user_id": message.user_id,
                     "updated_at": now,
                 },
-                "$setOnInsert": {"step": DialogueStep.ASK_DOMAIN.value},
+                "$setOnInsert": {"step": DialogueStep.GREET.value},
             },
             upsert=True,
             return_document=ReturnDocument.AFTER,
@@ -114,6 +114,27 @@ class MongoDialogues:
         )
         if found is None:
             raise LookupError(f"Диалог не найден: {channel.value} {chat_id}")
+        return Dialogue.model_validate(found)
+
+    async def save(self, dialogue: Dialogue) -> Dialogue:
+        await self._ready()
+        found = await self._collection.find_one_and_update(
+            _key(dialogue.channel, dialogue.chat_id),
+            {
+                "$set": {
+                    "user_id": dialogue.user_id,
+                    "step": dialogue.step.value,
+                    "host": dialogue.host,
+                    "slug": dialogue.slug,
+                    "site": dialogue.site,
+                    "image_url": dialogue.image_url,
+                    "updated_at": _now(),
+                }
+            },
+            return_document=ReturnDocument.AFTER,
+        )
+        if found is None:
+            raise LookupError(f"Диалог не найден: {dialogue.channel.value} {dialogue.chat_id}")
         return Dialogue.model_validate(found)
 
     async def _ready(self) -> None:

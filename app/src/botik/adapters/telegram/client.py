@@ -9,7 +9,7 @@ import logging
 import tempfile
 from pathlib import Path
 
-from telegram import Message, ReplyParameters, Update, User
+from telegram import KeyboardButton, Message, ReplyKeyboardMarkup, ReplyParameters, Update, User
 from telegram.ext import Application, ContextTypes, MessageHandler, Updater, filters
 
 from botik.app.intake import accept, preview
@@ -68,10 +68,17 @@ class TelegramMessenger:
         reply = None
         if message.reply_to is not None:
             reply = ReplyParameters(message_id=int(message.reply_to))
+        markup = None
+        if message.buttons:
+            markup = ReplyKeyboardMarkup(
+                [[KeyboardButton(label) for label in message.buttons]],
+                resize_keyboard=True,
+            )
         await self._bot.send_message(
             chat_id=message.chat_id,
             text=message.text,
             reply_parameters=reply,
+            reply_markup=markup,
         )
 
     async def _on_update(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

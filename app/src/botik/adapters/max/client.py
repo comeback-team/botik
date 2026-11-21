@@ -98,6 +98,17 @@ class MaxMessenger:
         body: dict[str, Any] = {"text": message.text}
         if message.reply_to:
             body["link"] = {"type": "reply", "mid": message.reply_to}
+        if message.buttons:
+            body["attachments"] = [
+                {
+                    "type": "inline_keyboard",
+                    "payload": {
+                        "buttons": [
+                            [{"type": "message", "text": label}] for label in message.buttons
+                        ]
+                    },
+                }
+            ]
         response = await self._http.post(
             "/messages",
             params={"chat_id": int(message.chat_id)},
@@ -169,6 +180,7 @@ def parse_update(update: dict[str, Any]) -> tuple[InboundMessage, str, list[str]
         message_id=str(body["mid"]),
         user_id=str(sender["user_id"]),
         text=text,
+        image_url=_image_url(attachments),
     )
     return inbound, _user_label(sender), _tags(attachments)
 
@@ -217,6 +229,17 @@ def _tags(attachments: list[Any]) -> list[str]:
         if tag not in tags:
             tags.append(tag)
     return tags
+
+
+def _image_url(attachments: list[Any]) -> str | None:
+    for attachment in attachments:
+        if not isinstance(attachment, dict) or attachment.get("type") not in {"image", "photo"}:
+            continue
+        payload = attachment.get("payload")
+        url = payload.get("url") if isinstance(payload, dict) else None
+        if isinstance(url, str) and url:
+            return url
+    return None
 
 
 def _user_label(sender: dict[str, Any]) -> str:

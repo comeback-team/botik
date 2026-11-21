@@ -12,12 +12,11 @@ from botik.adapters.whisper import WhisperTranscriber
 from botik.app.execute import EffectExecutor
 from botik.app.nginx_service import NginxService
 from botik.app.processor import ResponseProcessor, handler_registry
-from botik.app.intake import forward_to_model
+from botik.app.graph import Graph
 from botik.app.router import ChannelRouter
 from botik.app.turn import TurnService
 from botik.config import Settings
-from botik.domain.messages import InboundMessage, OutboundMessage
-from botik.ports.repos import DialogueRepository
+from botik.domain.messages import InboundMessage
 
 
 class App:
@@ -25,35 +24,24 @@ class App:
         self,
         router: ChannelRouter,
         turns: TurnService,
-        dialogues: DialogueRepository,
+        graph: Graph,
     ) -> None:
         self._router = router
-        self._dialogues = dialogues
+        self._graph = graph
         # Полный ход с инструментами не подписан.
-        # Живой маршрут — диалог в Mongo, затем текст входящего в модель.
+        # Живой маршрут — один граф для Telegram и MAX после транскрибации.
         router.bind(self._on_message)
         self._turns = turns
 
     async def _on_message(self, message: InboundMessage) -> None:
         try:
-            await self._dialogues.ensure(message)
+            await self._graph.handle(message)
         except Exception:
             logging.getLogger(__name__).exception(
-                "dialogue ensure failed channel=%s chat=%s",
+                "graph failed channel=%s chat=%s",
                 message.channel.value,
                 message.chat_id,
             )
-        await forward_to_model(message, self._reply)
-
-    async def _reply(self, message: InboundMessage, text: str) -> None:
-        await self._router.send(
-            message.channel,
-            OutboundMessage(
-                chat_id=message.chat_id,
-                text=text,
-                reply_to=message.message_id,
-            ),
-        )
 
     async def run(self) -> None:
         await self._router.run()
@@ -88,7 +76,15 @@ def build_app(settings: Settings) -> App:
         executor=executor,
         transcriber=transcriber,
     )
-    return App(router, turns, storage.dialogues)
+    graph = Graph(
+        storage.dialogues,
+        router.send,
+        content_dir=settings.content_dir,
+        rules_dir=settings.nginx_rules_dir,
+        public_ip=settings.public_ip,
+        base_domain=settings.base_domain,
+    )
+    return App(router, turns, graph)
 
 
 def main() -> None:

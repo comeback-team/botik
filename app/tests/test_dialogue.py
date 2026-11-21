@@ -62,7 +62,7 @@ class DialogueRepositoryTest(unittest.TestCase):
         repo = MongoDialogues(collection)
 
         created = asyncio.run(repo.ensure(_message()))
-        self.assertEqual(created.step, DialogueStep.ASK_DOMAIN)
+        self.assertEqual(created.step, DialogueStep.GREET)
         self.assertEqual(created.user_id, "7")
         self.assertEqual(created.chat_id, "42")
         self.assertEqual(collection.indexes[0][2], "channel_chat")

@@ -47,6 +47,10 @@ class DialogueRepository(Protocol):
         """Сменить шаг уже существующего диалога."""
         ...
 
+    async def save(self, dialogue: Dialogue) -> Dialogue:
+        """Записать шаг и собранные поля уже существующего диалога."""
+        ...
+
 
 class NginxStateRepository(Protocol):
     async def get(self) -> NginxDesiredState:

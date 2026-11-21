@@ -15,6 +15,10 @@ class Settings:
     mongo_uri: str | None
     nginx_sites_dir: Path
     nginx_enabled_dir: Path
+    content_dir: Path = Path("content")
+    nginx_rules_dir: Path = Path("nginx-rules")
+    public_ip: str | None = None
+    base_domain: str | None = None
     whisper_model: str = "small"
     whisper_language: str | None = None
     whisper_denoise: bool = False
@@ -29,6 +33,10 @@ class Settings:
             mongo_uri=_optional("MONGODB_URI"),
             nginx_sites_dir=Path(os.environ.get("NGINX_SITES_DIR", "/etc/nginx/sites-available")),
             nginx_enabled_dir=Path(os.environ.get("NGINX_ENABLED_DIR", "/etc/nginx/sites-enabled")),
+            content_dir=Path(os.environ.get("CONTENT_DIR", "content")),
+            nginx_rules_dir=Path(os.environ.get("NGINX_RULES_DIR", "nginx-rules")),
+            public_ip=_optional("BOTIK_PUBLIC_IP"),
+            base_domain=_optional("BOTIK_BASE_DOMAIN"),
             whisper_model=os.environ.get("WHISPER_MODEL", "small").strip() or "small",
             whisper_language=_optional("WHISPER_LANGUAGE"),
             whisper_denoise=_flag("WHISPER_DENOISE"),

@@ -14,7 +14,12 @@ from dotenv import load_dotenv
 from gigachat import GigaChat
 from gigachat.exceptions import BadRequestError, UnprocessableEntityError
 from gigachat.models import Chat, Messages, MessagesRole
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
+
+from botik.site.request import build_modify_request
+from botik.site.structure import SiteStructure
+from botik.site.token_counter import estimate_request_tokens, estimate_response_tokens
+
 
 _SCOPE = "GIGACHAT_API_PERS"
 _MODEL = "GigaChat-2"
@@ -160,9 +165,6 @@ def _timeout() -> float:
 
 def _verify_ssl() -> bool:
     return os.getenv("GIGACHAT_VERIFY_SSL", "false").strip().lower() in {"1", "true", "yes"}
-
-from botik.site.request import build_modify_request
-from botik.site.token_counter import estimate_request_tokens, estimate_response_tokens
 
 
 def modify_site(

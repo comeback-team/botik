@@ -31,6 +31,7 @@ class InboundMessage(BaseModel):
     user_id: str
     text: str | None = None
     voice_path: str | None = None
+    image_url: str | None = None
 
 
 class OutboundMessage(BaseModel):
@@ -39,6 +40,7 @@ class OutboundMessage(BaseModel):
     chat_id: str
     text: str
     reply_to: str | None = None
+    buttons: tuple[str, ...] = ()
 
 
 class ChatTurn(BaseModel):
