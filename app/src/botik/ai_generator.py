@@ -15,6 +15,8 @@ from gigachat import GigaChat
 from gigachat.exceptions import BadRequestError, UnprocessableEntityError
 from gigachat.models import Chat, Messages, MessagesRole
 from pydantic import BaseModel, ConfigDict, Field
+from botik.site.request import build_modify_request
+from botik.site.token_counter import estimate_request_tokens, estimate_response_tokens
 
 _SCOPE = "GIGACHAT_API_PERS"
 _MODEL = "GigaChat-2"
@@ -161,10 +163,6 @@ def _timeout() -> float:
 def _verify_ssl() -> bool:
     return os.getenv("GIGACHAT_VERIFY_SSL", "false").strip().lower() in {"1", "true", "yes"}
 
-from botik.site.request import build_modify_request
-from botik.site.token_counter import estimate_request_tokens, estimate_response_tokens
-
-
 def modify_site(
     current_structure: dict[str, Any],
     instruction: str,
@@ -185,7 +183,6 @@ def modify_site(
         logger.error("Ошибка сборки запроса на модификацию: %s", exc)
         return current_structure, {"status": "error", "error": str(exc)}
     
-    # Оценка токенов до запроса
     input_tokens = estimate_request_tokens(request.system, request.user, request.response_format)
     
     try:
@@ -208,6 +205,7 @@ def modify_site(
                 "total_tokens": input_tokens + output_tokens,
             },
         )
+    
     except ValidationError as exc:
         logger.error("Ответ модели не прошёл валидацию: %s", exc)
         return (
