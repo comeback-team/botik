@@ -5,6 +5,16 @@
 """
 
 import re
+_TOKEN_OR_URL_RE = re.compile(
+    r"^(\{\{(img|photo|image):\d+\}\}|https?://\S+|/media/\S+)$"
+)
+
+
+def _clean_image_url(value: str) -> str:
+    """Пропускает токен, http(s)-ссылку или наш /media/...; выдуманные URL гасит."""
+    value = (value or "").strip()
+    return value if _TOKEN_OR_URL_RE.match(value) else ""
+    
 from enum import StrEnum
 from typing import Annotated, Any, Literal, Union
 
@@ -177,6 +187,12 @@ class HeroBlock(BlockBase):
     subtitle: str = Field("", max_length=240)
     cta_text: str = Field("Оставить заявку", max_length=40)
     highlights: list[str] = Field(default_factory=list, max_length=3)
+    image_url: str = Field("", max_length=250)   # ← НОВОЕ
+
+    @field_validator("image_url")
+    @classmethod
+    def _image_url_clean(cls, value: str) -> str:   # ← НОВОЕ
+        return _clean_image_url(value)
 
 
 class TextBlock(BlockBase):
@@ -200,9 +216,14 @@ class FeaturesBlock(BlockBase):
 
 class GalleryItem(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
-
     caption: str = Field(max_length=80)
     alt: str = Field("", max_length=120)
+    image_url: str = Field("", max_length=250)   # ← НОВОЕ
+
+    @field_validator("image_url")
+    @classmethod
+    def _image_url_clean(cls, value: str) -> str:   # ← НОВОЕ
+        return _clean_image_url(value)
 
 
 class GalleryBlock(BlockBase):
