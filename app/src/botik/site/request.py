@@ -115,9 +115,17 @@ def _system_prompt() -> str:
     variants = "\n".join(
         f"- {name}: {', '.join(options)}" for name, options in BLOCK_VARIANTS.items()
     )
+    token_rules = (
+        "\n10. Токены {{img:N}}, {{phone:N}}, {{email:N}}, {{address:N}} — "
+        "плейсхолдеры чувствительных данных пользователя. Вставляй их ДОСЛОВНО "
+        "в соответствующие поля (image_url, phone, email, address), не меняй "
+        "и не расшифровывай. Не выдумывай URL картинок: нет токена — оставь "
+        "image_url пустым."
+    )
     return (
         f"{_SYSTEM}\n"
-        f"КАТАЛОГ ВАРИАНТОВ (выбирай только из него):\n{variants}"
+        f"{token_rules}\n"
+        f"КАТАЛОГ ВАРИАНТОВ (выбирай только из него):\n{variants}\n"
         "\nЗаполняй все блоки конкретикой из брифа, без пустых заглушек."
     )
 
