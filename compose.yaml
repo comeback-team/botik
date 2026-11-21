@@ -5,12 +5,23 @@ services:
     restart: unless-stopped
     # env_file:
     #   - .env
+    depends_on:
+      - mongo
     ports:
       - 8080:8080
     volumes:
       - content:/app/content
       - nginx-rules:/app/nginx-rules
-  
+
+  mongo:
+    image: mongo:8
+    container_name: botik-mongo
+    restart: unless-stopped
+    ports:
+      - 27017:27017
+    volumes:
+      - mongo-data:/data/db
+
   nginx:
     build: nginx
     image: botik-nginx
@@ -30,3 +41,4 @@ services:
 volumes:
   content:
   nginx-rules:
+  mongo-data:
