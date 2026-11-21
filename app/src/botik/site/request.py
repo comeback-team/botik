@@ -128,3 +128,59 @@ def _user_prompt(brief: str) -> str:
         "Собери сайт из 6-12 блоков, заполненных конкретикой этого бизнеса. "
         "Обязательно interactive с главным сценарием."
     )
+
+def build_modify_request(
+    current_structure: dict[str, Any],
+    instruction: str,
+    *,
+    schema_mode: SchemaMode = "inline",
+) -> SiteRequest:
+    """Собрать запрос на модификацию существующей структуры сайта.
+    
+    Args:
+        current_structure: текущая структура сайта (dict)
+        instruction: инструкция от пользователя (что изменить)
+        schema_mode: "inline" или "prompt"
+    
+    Returns:
+        SiteRequest с промптом и схемой
+    """
+    text = instruction.strip()
+    if len(text) < 3:
+        raise ValueError("Инструкция слишком короткая")
+    
+    schema = gigachat_schema(SiteStructure)
+    system = _system_prompt()
+    
+    if schema_mode == "prompt":
+        system += "\nJSON-СХЕМА:\n" + json.dumps(schema, ensure_ascii=False)
+        response_format: dict[str, Any] = {"type": "json_object"}
+    else:
+        response_format = {"type": "json_schema", "schema": schema}
+    
+    # Добавляем в системный промпт инструкцию о модификации
+    system += (
+        "\n\nЗАДАЧА: модифицировать существующую структуру сайта по инструкции пользователя. "
+        "Сохрани все блоки, которые не нужно менять. "
+        "Верни полную обновлённую структуру в формате JSON."
+    )
+    
+    user = _modify_user_prompt(current_structure, text)
+    
+    return SiteRequest(
+        system=system,
+        user=user,
+        response_format=response_format,
+        output_model=SiteStructure,
+    )
+
+def _modify_user_prompt(current_structure: dict[str, Any], instruction: str) -> str:
+    """Сформировать пользовательский промпт для модификации."""
+    return (
+        f"Текущая структура сайта:\n```json\n"
+        f"{json.dumps(current_structure, ensure_ascii=False, indent=2)}\n```\n\n"
+        f"Инструкция пользователя:\n\"\"\"{instruction}\"\"\"\n\n"
+        "Измени структуру сайта согласно инструкции. "
+        "Сохрани все блоки, которые не нужно менять. "
+        "Верни полную обновлённую структуру в формате JSON."
+    )
