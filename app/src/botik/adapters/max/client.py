@@ -14,6 +14,8 @@ from typing import Any
 
 import httpx
 
+from botik.adapters.content import image_suffix, stored_image
+from botik.ports.repos import DialogueRepository
 from botik.app.intake import accept, preview
 from botik.app.speech import render_speech
 from botik.domain.messages import Channel, InboundMessage, OutboundMessage
@@ -37,10 +39,21 @@ _TAGS = {
 class MaxMessenger:
     channel = Channel.MAX
 
-    def __init__(self, token: str | None, transcriber: Transcriber | None = None) -> None:
+    def __init__(
+        self,
+        token: str | None,
+        transcriber: Transcriber | None = None,
+        *,
+        dialogues: DialogueRepository | None = None,
+        content_dir: Path | None = None,
+        base_domain: str | None = None,
+    ) -> None:
         self._token = token
         self._handler: MessageHandler | None = None
         self._transcriber = transcriber
+        self._dialogues = dialogues
+        self._content_dir = content_dir
+        self._base_domain = base_domain
         self._http: httpx.AsyncClient | None = None
 
     @property
@@ -131,9 +144,29 @@ class MaxMessenger:
             return
         audio = await self._download_audio(audio_url(update))
         inbound, tags = await render_speech(inbound, tags, audio, self._transcriber)
+        inbound = await self._keep_image(inbound)
         if seen is not None:
             seen.add(inbound.message_id)
         await accept(self._handler, inbound, name=name, preview_text=preview(inbound.text, tags))
+
+    async def _keep_image(self, inbound: InboundMessage) -> InboundMessage:
+        remote = inbound.image_url
+        if remote is None or self._content_dir is None:
+            return inbound
+        try:
+            data, content_type = await _download_image_bytes(remote)
+        except httpx.HTTPError:
+            logger.warning("max image download failed")
+            return inbound
+        suffix = image_suffix(remote, content_type)
+        return await stored_image(
+            inbound.model_copy(update={"image_url": None}),
+            self._dialogues,
+            self._content_dir,
+            self._base_domain,
+            data,
+            suffix,
+        )
 
     async def _download_audio(self, url: str | None) -> Path | None:
         if not url:
@@ -199,6 +232,13 @@ def audio_url(update: dict[str, Any]) -> str | None:
         if isinstance(url, str) and url:
             return url
     return None
+
+
+async def _download_image_bytes(url: str) -> tuple[bytes, str]:
+    async with httpx.AsyncClient(timeout=60, verify=_ssl_context(), follow_redirects=True) as client:
+        response = await client.get(url)
+        response.raise_for_status()
+        return response.content, response.headers.get("content-type", "")
 
 
 async def _download_audio_bytes(url: str) -> tuple[bytes, str]:

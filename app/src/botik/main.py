@@ -56,8 +56,20 @@ def build_app(settings: Settings) -> App:
     )
     router = ChannelRouter(
         (
-            TelegramMessenger(settings.telegram_token, transcriber),
-            MaxMessenger(settings.max_token, transcriber),
+            TelegramMessenger(
+                settings.telegram_token,
+                transcriber,
+                dialogues=storage.dialogues,
+                content_dir=settings.content_dir,
+                base_domain=settings.base_domain,
+            ),
+            MaxMessenger(
+                settings.max_token,
+                transcriber,
+                dialogues=storage.dialogues,
+                content_dir=settings.content_dir,
+                base_domain=settings.base_domain,
+            ),
         )
     )
     executor = EffectExecutor(

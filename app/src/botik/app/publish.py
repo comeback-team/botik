@@ -3,7 +3,7 @@
 import re
 from pathlib import Path
 
-from botik.domain.nginx import site_slug
+from botik.adapters.content import site_folder
 from botik.site.render import render_instruction
 
 _HOST = re.compile(r"^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$")
@@ -12,11 +12,10 @@ _PLACEHOLDER = "<!doctype html><meta charset=utf-8><title>Сайт собира�
 
 
 def folder_name(host: str | None, slug: str | None) -> str:
-    if slug:
-        return site_slug(slug)
-    if host:
-        return site_slug(host.replace(".", "-"))
-    raise ValueError("нет имени для каталога сайта")
+    name = site_folder(host, slug)
+    if name is None:
+        raise ValueError("нет имени для каталога сайта")
+    return name
 
 
 def server_name(host: str | None, slug: str | None, base_domain: str | None) -> str | None:
