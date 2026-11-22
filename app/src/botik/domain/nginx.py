@@ -21,6 +21,44 @@ def site_slug(name: str) -> str:
     return slug
 
 
+_HOST = re.compile(r"^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$")
+
+
+def is_domain(host: str) -> bool:
+    return _HOST.fullmatch(host) is not None
+
+
+def site_host(text: str) -> str | None:
+    """Хост из адреса: без схемы, порта, пути и пользователя."""
+
+    raw = text.strip()
+    if "://" in raw:
+        raw = raw.split("://", 1)[1]
+    raw = raw.split("/", 1)[0].split("?", 1)[0].split("#", 1)[0]
+    if "@" in raw:
+        raw = raw.rsplit("@", 1)[1]
+    if raw.count(":") == 1:
+        raw = raw.split(":", 1)[0]
+    raw = raw.strip().strip(".").lower()
+    if is_domain(raw):
+        return raw
+    return None
+
+
+def base_host(value: str | None) -> str | None:
+    if value is None or not value.strip():
+        return None
+    text = value.strip()
+    return site_host(text) or site_host(f"http://{text}")
+
+
+def is_our_host(host: str, base_domain: str | None) -> bool:
+    root = base_host(base_domain)
+    if root is None:
+        return False
+    return host == root or host.endswith(f".{root}")
+
+
 class NginxSite(BaseModel):
     model_config = ConfigDict(frozen=True)
 

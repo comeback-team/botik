@@ -6,8 +6,17 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 from botik.ai_generator import complete, modify_site
-from botik.app.publish import folder_name, publish_html, reserve_site, server_name
-from botik.app.story import StoryMove, advance, wants_dns_check
+from botik.app.publish import (
+    folder_name,
+    owner_line,
+    publish_html,
+    release_site,
+    reserve_site,
+    server_name,
+    site_held,
+    site_owned_by,
+)
+from botik.app.story import StoryMove, advance, refuse_taken, wants_dns_check
 from botik.domain.dialogue import Dialogue, DialogueStep
 from botik.domain.messages import Channel, InboundMessage, OutboundMessage
 from botik.ports.repos import DialogueRepository
@@ -60,8 +69,15 @@ class Graph:
             public_ip=self._public_ip,
             base_domain=self._base_domain,
         )
-        dialogue, replies = await self._apply(move)
-        await self._dialogues.save(dialogue)
+        if move.release_host:
+            release_site(self._content_dir, self._rules_dir, move.release_host)
+        claimed = move.dialogue.host
+        if claimed and self._blocked(dialogue, move, claimed):
+            move = refuse_taken(dialogue, claimed)
+            replies = move.replies
+        else:
+            dialogue, replies = await self._apply(move)
+            await self._dialogues.save(dialogue)
         labels = () if move.generate_brief or move.modify_instruction else move.buttons
         labels = labels + (RESTART_BUTTON,)
         last = len(replies) - 1
@@ -85,6 +101,18 @@ class Graph:
         if move.modify_instruction:
             return await self._edit(dialogue, move.modify_instruction, move.replies)
         return dialogue, move.replies
+
+    def _blocked(self, previous: Dialogue, move: StoryMove, claimed: str) -> bool:
+        if claimed == previous.host and not move.reserve:
+            return False
+        if not site_held(self._content_dir, self._rules_dir, claimed):
+            return False
+        return not site_owned_by(
+            self._rules_dir,
+            claimed,
+            previous.channel.value,
+            previous.chat_id,
+        )
 
     async def _build(
         self,
@@ -135,6 +163,7 @@ def _reserve(dialogue: Dialogue, content_dir: Path, rules_dir: Path, base_domain
         rules_dir=rules_dir,
         folder=folder,
         name=server_name(dialogue.host, dialogue.slug, base_domain),
+        owner=owner_line(dialogue.channel.value, dialogue.chat_id),
     )
 
 
@@ -152,6 +181,7 @@ def _publish(
         rules_dir=rules_dir,
         folder=folder,
         name=server_name(dialogue.host, dialogue.slug, base_domain),
+        owner=owner_line(dialogue.channel.value, dialogue.chat_id),
     )
 
 
