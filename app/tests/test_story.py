@@ -35,6 +35,8 @@ class StoryTest(unittest.TestCase):
         move = advance(_dialogue(), "привет")
         self.assertEqual(move.dialogue.step, DialogueStep.ASK_DOMAIN)
         self.assertEqual(move.replies[0], "Привет. Я соберу сайт по твоему описанию.")
+        self.assertEqual(move.buttons, ("Свой домен", "Нет своего"))
+        self.assertNotIn("напиши", " ".join(move.replies).casefold())
 
     def test_own_domain_waits_for_dns_then_opens_the_brief(self) -> None:
         asked = advance(_dialogue(step=DialogueStep.ASK_DOMAIN), "cafe.ru", public_ip="203.0.113.5")
@@ -56,8 +58,9 @@ class StoryTest(unittest.TestCase):
         self.assertIsNone(move.dialogue.host)
 
     def test_slug_then_restart_returns_to_the_domain_question(self) -> None:
-        reserved = advance(_dialogue(step=DialogueStep.ASK_SLUG), "Coffee")
+        reserved = advance(_dialogue(step=DialogueStep.ASK_SLUG), "Coffee", base_domain="example.com")
         self.assertEqual(reserved.dialogue.slug, "coffee")
+        self.assertIn("Вашим доменом будет coffee.example.com.", reserved.replies[0])
         self.assertEqual(reserved.dialogue.step, DialogueStep.ASK_BRIEF)
 
         restarted = advance(reserved.dialogue, "Начать сначала")
@@ -101,8 +104,9 @@ class GraphRunTest(unittest.TestCase):
             base_domain=None,
         )
         asyncio.run(graph.handle(_message("привет")))
-        self.assertEqual(sent[0].buttons, (RESTART_BUTTON,))
+        self.assertEqual(sent[-1].buttons, ("Свой домен", "Нет своего", RESTART_BUTTON))
         self.assertIn("Привет", sent[0].text)
+        self.assertNotIn("напиши", sent[-1].text.casefold())
 
     def test_brief_publishes_html_for_the_saved_slug(self) -> None:
         site = {

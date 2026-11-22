@@ -20,14 +20,18 @@ _GIVE_UP = ("не разобрался", "нет сисадмина", "не по
 _CHECK = {"готово", "проверить", "проверил", "поставил", "сделал", "запись готова"}
 
 _HELLO = "Привет. Я соберу сайт по твоему описанию."
-_ASK_DOMAIN = (
-    "Какой у тебя будет домен? Напиши его, если он свой. "
-    "Если своего нет — напиши «нет своего»."
-)
-_ASK_SLUG = "Напиши короткое имя сайта латиницей, например coffee."
-_ASK_BRIEF = "Какой сайт ты хочешь? Напиши подробнее."
-_WHERE = "Где разместить эту картинку? Напиши, и я обновлю сайт."
+_ASK_DOMAIN = "Какой у тебя будет домен?"
+_ASK_HOST = "Домен, например cafe.ru."
+_ASK_SLUG = "Короткое имя сайта латиницей, например coffee."
+_ASK_BRIEF = "Какой сайт ты хочешь? Опиши его подробнее."
+_WHERE = "Где разместить эту картинку?"
 _AGAIN = "Не понял ответ. "
+_OWN_BUTTON = "Свой домен"
+_OURS_BUTTON = "Нет своего"
+_READY_BUTTON = "Готово"
+_GIVE_UP_BUTTON = "Не разобрался"
+_DOMAIN_BUTTONS = (_OWN_BUTTON, _OURS_BUTTON)
+_DNS_BUTTONS = (_READY_BUTTON, _GIVE_UP_BUTTON)
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,6 +41,7 @@ class StoryMove:
     generate_brief: str | None = None
     modify_instruction: str | None = None
     reserve: bool = False
+    buttons: tuple[str, ...] = ()
 
 
 def wants_dns_check(dialogue: Dialogue, text: str) -> bool:
@@ -54,6 +59,7 @@ def advance(
     image_url: str | None = None,
     dns_matches: bool | None = None,
     public_ip: str | None = None,
+    base_domain: str | None = None,
 ) -> StoryMove:
     """Следующий шаг и реплики. dns_matches заполнен только на проверке A-записи."""
 
@@ -67,7 +73,7 @@ def advance(
     if dialogue.step is DialogueStep.OWN_DNS:
         return _from_dns(dialogue, normalized, dns_matches, public_ip)
     if dialogue.step is DialogueStep.ASK_SLUG:
-        return _from_slug(dialogue, normalized)
+        return _from_slug(dialogue, normalized, base_domain)
     if dialogue.step is DialogueStep.ASK_BRIEF:
         return _from_brief(dialogue, text.strip())
     if dialogue.step is DialogueStep.EDITING:
@@ -81,11 +87,11 @@ def _from_domain(dialogue: Dialogue, text: str, public_ip: str | None) -> StoryM
     if text in _OWN:
         return StoryMove(
             dialogue.model_copy(update={"step": DialogueStep.OWN_DNS, "host": None}),
-            ("Напиши домен, например cafe.ru.",),
+            (_ASK_HOST,),
         )
     if _HOST.fullmatch(text):
         return _own_host(dialogue, text, public_ip)
-    return StoryMove(dialogue, (_AGAIN + _ASK_DOMAIN,))
+    return StoryMove(dialogue, (_AGAIN + _ASK_DOMAIN,), buttons=_DOMAIN_BUTTONS)
 
 
 def _from_dns(
@@ -103,27 +109,29 @@ def _from_dns(
         if not public_ip:
             return StoryMove(
                 dialogue,
-                ("Адрес сервера не задан, проверить A-запись не могу. Напиши «не разобрался», если нужен наш адрес.",),
+                ("Адрес сервера не задан, проверить A-запись не могу.",),
+                buttons=_DNS_BUTTONS,
             )
         if dns_matches:
             moved = dialogue.model_copy(update={"step": DialogueStep.ASK_BRIEF})
             return StoryMove(moved, ("Запись домена отвечает. " + _ASK_BRIEF,), reserve=True)
         return StoryMove(
             dialogue,
-            (f"A-запись {dialogue.host} ещё не указывает на {public_ip}. Напиши «готово», когда обновится.",),
+            (f"A-запись {dialogue.host} ещё не указывает на {public_ip}.",),
+            buttons=_DNS_BUTTONS,
         )
     if dialogue.host is None:
-        return StoryMove(dialogue, ("Напиши домен, например cafe.ru.",))
-    return StoryMove(dialogue, (_a_record(dialogue.host, public_ip),))
+        return StoryMove(dialogue, (_ASK_HOST,))
+    return StoryMove(dialogue, (_a_record(dialogue.host, public_ip),), buttons=_DNS_BUTTONS)
 
 
-def _from_slug(dialogue: Dialogue, text: str) -> StoryMove:
+def _from_slug(dialogue: Dialogue, text: str, base_domain: str | None) -> StoryMove:
     try:
         slug = site_slug(text)
     except ValueError:
         return StoryMove(dialogue, ("Нужно короткое имя латиницей, цифрами и дефисом. " + _ASK_SLUG,))
     moved = dialogue.model_copy(update={"slug": slug, "step": DialogueStep.ASK_BRIEF})
-    return StoryMove(moved, (f"Имя {slug} занято за этим чатом. " + _ASK_BRIEF,), reserve=True)
+    return StoryMove(moved, (f"Вашим доменом будет {_address(slug, base_domain)}. " + _ASK_BRIEF,), reserve=True)
 
 
 def _from_brief(dialogue: Dialogue, text: str) -> StoryMove:
@@ -143,7 +151,7 @@ def _from_editing(dialogue: Dialogue, text: str, image_url: str | None) -> Story
             (_ASK_BRIEF,),
         )
     if len(text) < 3:
-        return StoryMove(dialogue, ("Если хотите поменять сайт, просто напишите.",))
+        return StoryMove(dialogue, ("Если хотите поменять сайт, опишите, что изменить.",))
     return StoryMove(dialogue, ("Обновляю сайт.",), modify_instruction=text)
 
 
@@ -161,7 +169,7 @@ def _from_image(dialogue: Dialogue, text: str) -> StoryMove:
 
 def _own_host(dialogue: Dialogue, host: str, public_ip: str | None) -> StoryMove:
     moved = dialogue.model_copy(update={"step": DialogueStep.OWN_DNS, "host": host})
-    return StoryMove(moved, (_a_record(host, public_ip),))
+    return StoryMove(moved, (_a_record(host, public_ip),), buttons=_DNS_BUTTONS)
 
 
 def _domain_question(dialogue: Dialogue, replies: tuple[str, ...]) -> StoryMove:
@@ -174,20 +182,23 @@ def _domain_question(dialogue: Dialogue, replies: tuple[str, ...]) -> StoryMove:
             "image_url": None,
         }
     )
-    return StoryMove(cleared, replies)
+    return StoryMove(cleared, replies, buttons=_DOMAIN_BUTTONS)
 
 
 def _a_record(host: str, public_ip: str | None) -> str:
     if public_ip:
-        return (
-            f"Поставь A-запись {host} на {public_ip}. "
-            "Когда она ответит, напиши «готово». Если не получается — напиши «не разобрался»."
-        )
+        return f"Поставь A-запись {host} на {public_ip}."
     return (
         f"Поставь A-запись {host} на наш сервер. "
-        "Адрес сервера не задан, поэтому проверить запись я не могу. "
-        "Если не получается — напиши «не разобрался»."
+        "Адрес сервера не задан, поэтому проверить запись я не могу."
     )
+
+
+def _address(slug: str, base_domain: str | None) -> str:
+    domain = (base_domain or "").strip().strip(".")
+    if domain:
+        return f"{slug}.{domain}"
+    return slug
 
 
 def _norm(text: str) -> str:

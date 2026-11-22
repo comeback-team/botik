@@ -17,8 +17,8 @@ from botik.site.structure import SiteStructure
 logger = logging.getLogger(__name__)
 
 RESTART_BUTTON = "Начать сначала"
-_FAILED = "Не получилось собрать сайт. Напиши описание ещё раз."
-_UPDATED = "Если хотите поменять сайт, просто напишите."
+_FAILED = "Не получилось собрать сайт. Опиши его ещё раз."
+_UPDATED = "Если хотите поменять сайт, опишите, что изменить."
 
 SiteBuilder = Callable[[str], dict]
 SiteEditor = Callable[[dict, str], dict]
@@ -58,17 +58,21 @@ class Graph:
             image_url=message.image_url,
             dns_matches=dns_matches,
             public_ip=self._public_ip,
+            base_domain=self._base_domain,
         )
         dialogue, replies = await self._apply(move)
         await self._dialogues.save(dialogue)
-        for text in replies:
+        labels = () if move.generate_brief or move.modify_instruction else move.buttons
+        labels = labels + (RESTART_BUTTON,)
+        last = len(replies) - 1
+        for index, text in enumerate(replies):
             await self._send(
                 message.channel,
                 OutboundMessage(
                     chat_id=message.chat_id,
                     text=text,
                     reply_to=message.message_id,
-                    buttons=(RESTART_BUTTON,),
+                    buttons=labels if index == last else (),
                 )
             )
 

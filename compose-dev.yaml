@@ -1,0 +1,7 @@
+services:
+  mongo:
+    image: mongo:8
+    container_name: botik-mongo
+    restart: unless-stopped
+    ports:
+      - 27017:27017
