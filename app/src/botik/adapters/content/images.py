@@ -1,13 +1,13 @@
 """Картинка лежит в папке сайта, рядом с index.html.
 
-Файл: content/<slug или домен>/<сообщение>.<расширение>
+Файл: content/<домен>/<сообщение>.<расширение>
 В текст сообщения добавляется ссылка на него.
 """
 
 from pathlib import Path
 
 from botik.domain.messages import InboundMessage
-from botik.domain.nginx import site_slug
+from botik.domain.nginx import is_domain, site_slug
 from botik.ports.repos import DialogueRepository
 
 _SUFFIXES = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
@@ -70,11 +70,12 @@ def remember_image(
 
 
 def site_folder(host: str | None, slug: str | None) -> str | None:
-    raw = slug or (host.replace(".", "-") if host else None)
-    if not raw:
+    if host and is_domain(host):
+        return host
+    if not slug:
         return None
     try:
-        return site_slug(raw)
+        return site_slug(slug)
     except ValueError:
         return None
 

@@ -4,8 +4,10 @@ import asyncio
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from botik.app.graph import RESTART_BUTTON, Graph
+from botik.app.publish import owner_line, reserve_site
 from botik.app.story import advance
 from botik.domain.dialogue import Dialogue, DialogueStep
 from botik.domain.messages import Channel, InboundMessage, OutboundMessage
@@ -60,12 +62,16 @@ class StoryTest(unittest.TestCase):
     def test_slug_then_restart_returns_to_the_domain_question(self) -> None:
         reserved = advance(_dialogue(step=DialogueStep.ASK_SLUG), "Coffee", base_domain="example.com")
         self.assertEqual(reserved.dialogue.slug, "coffee")
+        self.assertEqual(reserved.dialogue.host, "coffee.example.com")
         self.assertIn("Вашим доменом будет http://coffee.example.com.", reserved.replies[0])
         self.assertEqual(reserved.dialogue.step, DialogueStep.ASK_BRIEF)
+        self.assertTrue(reserved.reserve)
 
         restarted = advance(reserved.dialogue, "Начать сначала")
         self.assertEqual(restarted.dialogue.step, DialogueStep.ASK_DOMAIN)
         self.assertIsNone(restarted.dialogue.slug)
+        self.assertIsNone(restarted.dialogue.host)
+        self.assertEqual(restarted.release_host, "coffee.example.com")
 
     def test_picture_is_placed_by_the_next_text(self) -> None:
         editing = _dialogue(step=DialogueStep.EDITING, slug="coffee", site={"business_type": "кофе"})
@@ -74,6 +80,31 @@ class StoryTest(unittest.TestCase):
         placed = advance(parked.dialogue, "в первый экран")
         self.assertIn("https://cdn.example/cup.png", placed.modify_instruction or "")
         self.assertIn("в первый экран", placed.modify_instruction or "")
+
+    def test_address_is_only_the_host_and_our_zone_is_refused(self) -> None:
+        pasted = advance(
+            _dialogue(step=DialogueStep.ASK_DOMAIN),
+            "https://Cafe.RU/menu",
+            public_ip="203.0.113.5",
+            base_domain="example.com",
+        )
+        self.assertEqual(pasted.dialogue.host, "cafe.ru")
+        self.assertFalse(pasted.reserve)
+
+        ours = advance(
+            _dialogue(step=DialogueStep.ASK_DOMAIN),
+            "coffee.example.com",
+            base_domain="https://example.com",
+        )
+        self.assertEqual(ours.dialogue.step, DialogueStep.ASK_DOMAIN)
+        self.assertIsNone(ours.dialogue.host)
+        self.assertIn("Это наш домен", ours.replies[0])
+
+    def test_slug_without_base_domain_does_not_reserve(self) -> None:
+        move = advance(_dialogue(step=DialogueStep.ASK_SLUG), "coffee", base_domain=None)
+        self.assertEqual(move.dialogue.step, DialogueStep.ASK_SLUG)
+        self.assertFalse(move.reserve)
+        self.assertIn("не задан", move.replies[0])
 
 
 class GraphRunTest(unittest.TestCase):
@@ -143,6 +174,7 @@ class GraphRunTest(unittest.TestCase):
                     user_id="7",
                     step=DialogueStep.ASK_BRIEF,
                     slug="coffee",
+                    host="coffee.example.com",
                 )
 
             async def ensure(self, message: InboundMessage) -> Dialogue:
@@ -171,13 +203,127 @@ class GraphRunTest(unittest.TestCase):
                 generate=lambda brief: site,
             )
             asyncio.run(graph.handle(_message("кофейня у дома", channel=Channel.TELEGRAM)))
-            html = (root / "content" / "coffee" / "index.html").read_text(encoding="utf-8")
-            rule = (root / "rules" / "coffee.conf").read_text(encoding="utf-8")
+            html = (root / "content" / "coffee.example.com" / "index.html").read_text(encoding="utf-8")
+            rule = (root / "rules" / "coffee.example.com.conf").read_text(encoding="utf-8")
 
         self.assertIn("Кофейня", html)
         self.assertIn("server_name coffee.example.com;", rule)
         self.assertEqual(repo.dialogue.step, DialogueStep.EDITING)
         self.assertIn("Собираю сайт.", sent)
+
+
+class _Repo:
+    def __init__(self, dialogue: Dialogue) -> None:
+        self.dialogue = dialogue
+
+    async def ensure(self, message: InboundMessage) -> Dialogue:
+        del message
+        return self.dialogue
+
+    async def save(self, dialogue: Dialogue) -> Dialogue:
+        self.dialogue = dialogue
+        return dialogue
+
+
+class DomainFilesTest(unittest.TestCase):
+    def _graph(self, root: Path, dialogue: Dialogue, public_ip: str | None = "203.0.113.5") -> tuple[Graph, _Repo, list[str]]:
+        sent: list[str] = []
+        repo = _Repo(dialogue)
+
+        async def send(channel: Channel, message: OutboundMessage) -> None:
+            del channel
+            sent.append(message.text)
+
+        graph = Graph(
+            repo,
+            send,
+            content_dir=root / "content",
+            rules_dir=root / "rules",
+            public_ip=public_ip,
+            base_domain="example.com",
+        )
+        return graph, repo, sent
+
+    def test_own_domain_is_written_after_the_address_matches(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            graph, repo, sent = self._graph(
+                root,
+                Dialogue(channel=Channel.MAX, chat_id="9", user_id="5", step=DialogueStep.ASK_DOMAIN),
+            )
+            asyncio.run(graph.handle(_message("https://Cafe.RU/menu")))
+            self.assertEqual(repo.dialogue.host, "cafe.ru")
+            self.assertFalse((root / "content" / "cafe.ru").exists())
+
+            with patch("botik.app.graph._address_matches", return_value=True):
+                asyncio.run(graph.handle(_message("готово")))
+            rule = (root / "rules" / "cafe.ru.conf").read_text(encoding="utf-8")
+            self.assertTrue((root / "content" / "cafe.ru" / "index.html").is_file())
+
+        self.assertIn("server_name cafe.ru;", rule)
+        self.assertIn("root /var/www/content/cafe.ru;", rule)
+        self.assertEqual(repo.dialogue.step, DialogueStep.ASK_BRIEF)
+        self.assertIn("Запись домена отвечает", sent[-1])
+
+    def test_taken_name_stays_on_the_same_step(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / "rules").mkdir()
+            (root / "rules" / "old.conf").write_text(
+                "server {\n    server_name coffee.example.com;\n}\n",
+                encoding="utf-8",
+            )
+            graph, repo, sent = self._graph(
+                root,
+                Dialogue(channel=Channel.MAX, chat_id="9", user_id="5", step=DialogueStep.ASK_SLUG),
+                public_ip=None,
+            )
+            asyncio.run(graph.handle(_message("coffee")))
+            self.assertFalse((root / "rules" / "coffee.example.com.conf").exists())
+
+        self.assertEqual(repo.dialogue.step, DialogueStep.ASK_SLUG)
+        self.assertIn("уже занят", sent[-1])
+
+    def test_restart_removes_the_site_files(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            graph, repo, _sent = self._graph(
+                root,
+                Dialogue(channel=Channel.MAX, chat_id="9", user_id="5", step=DialogueStep.ASK_SLUG),
+                public_ip=None,
+            )
+            asyncio.run(graph.handle(_message("coffee")))
+            self.assertTrue((root / "rules" / "coffee.example.com.conf").is_file())
+            asyncio.run(graph.handle(_message("Начать сначала")))
+            self.assertFalse((root / "rules" / "coffee.example.com.conf").exists())
+            self.assertFalse((root / "content" / "coffee.example.com").exists())
+
+        self.assertEqual(repo.dialogue.step, DialogueStep.ASK_DOMAIN)
+        self.assertIsNone(repo.dialogue.host)
+
+    def test_ready_index_is_kept(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            dialogue = Dialogue(
+                channel=Channel.MAX,
+                chat_id="9",
+                user_id="5",
+                step=DialogueStep.OWN_DNS,
+                host="cafe.ru",
+            )
+            reserve_site(
+                content_dir=root / "content",
+                rules_dir=root / "rules",
+                folder="cafe.ru",
+                name="cafe.ru",
+                owner=owner_line(dialogue.channel.value, dialogue.chat_id),
+            )
+            index = root / "content" / "cafe.ru" / "index.html"
+            index.write_text("готовый", encoding="utf-8")
+            graph, _repo, _sent = self._graph(root, dialogue)
+            with patch("botik.app.graph._address_matches", return_value=True):
+                asyncio.run(graph.handle(_message("готово")))
+            self.assertEqual(index.read_text(encoding="utf-8"), "готовый")
 
 
 if __name__ == "__main__":

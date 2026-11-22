@@ -47,7 +47,13 @@ class MaxImageStoreTest(unittest.TestCase):
 
         class Dialogues:
             async def get(self, channel: Channel, chat_id: str) -> Dialogue:
-                return Dialogue(channel=channel, chat_id=chat_id, user_id="5", slug="coffee")
+                return Dialogue(
+                    channel=channel,
+                    chat_id=chat_id,
+                    user_id="5",
+                    slug="coffee",
+                    host="coffee.example.com",
+                )
 
         async def handler(message: InboundMessage) -> None:
             seen.append(message)
@@ -82,14 +88,14 @@ class MaxImageStoreTest(unittest.TestCase):
                 self.assertLogs("botik.app.intake", level=logging.INFO),
             ):
                 asyncio.run(messenger._on_update(update))
-            saved = Path(folder) / "coffee" / "mid1.png"
+            saved = Path(folder) / "coffee.example.com" / "mid1.png"
             self.assertEqual(saved.read_bytes(), b"png")
 
         self.assertEqual(
             seen[0].text,
-            "смотри\n{{img:https://example.com/content/coffee/mid1.png}}",
+            "смотри\n{{img:https://example.com/content/coffee.example.com/mid1.png}}",
         )
-        self.assertEqual(seen[0].image_url, "https://example.com/content/coffee/mid1.png")
+        self.assertEqual(seen[0].image_url, "https://example.com/content/coffee.example.com/mid1.png")
 
 
 if __name__ == "__main__":
