@@ -1,7 +1,5 @@
 """Доменные типы. Не импортируют адаптеры и приложение."""
 
-from botik.domain.effects import Effect, PersistTurn, Reply
-from botik.domain.llm import Intent, LlmResult, ToolSpec
 from botik.domain.messages import (
     Channel,
     ChatTurn,
@@ -23,17 +21,11 @@ __all__ = [
     "Channel",
     "ChatTurn",
     "Conversation",
-    "Effect",
     "InboundMessage",
-    "Intent",
-    "LlmResult",
     "NginxChange",
     "NginxDesiredState",
     "NginxSite",
     "OutboundMessage",
-    "PersistTurn",
-    "Reply",
-    "ToolSpec",
     "apply_change",
     "empty_conversation",
 ]
