@@ -4,6 +4,7 @@ import asyncio
 import logging
 from collections.abc import Sequence
 
+from botik.app.webhook import WebhookServer
 from botik.domain.messages import Channel, OutboundMessage
 from botik.ports.messenger import MessageHandler, Messenger
 
@@ -11,8 +12,9 @@ logger = logging.getLogger(__name__)
 
 
 class ChannelRouter:
-    def __init__(self, messengers: Sequence[Messenger]) -> None:
+    def __init__(self, messengers: Sequence[Messenger], webhooks: WebhookServer) -> None:
         self._by_channel = {messenger.channel: messenger for messenger in messengers}
+        self._webhooks = webhooks
         if len(self._by_channel) != len(messengers):
             raise ValueError("duplicate messenger channel")
 
@@ -29,4 +31,9 @@ class ChannelRouter:
         logger.info("listening on %s", names)
         if not enabled:
             return
-        await asyncio.gather(*(messenger.run() for messenger in enabled))
+        server = asyncio.create_task(self._webhooks.serve())
+        try:
+            await asyncio.gather(*(messenger.run() for messenger in enabled))
+        finally:
+            server.cancel()
+            await asyncio.gather(server, return_exceptions=True)

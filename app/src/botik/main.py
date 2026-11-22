@@ -9,6 +9,7 @@ from botik.adapters.telegram import TelegramMessenger
 from botik.adapters.whisper import WhisperTranscriber
 from botik.app.graph import Graph
 from botik.app.router import ChannelRouter
+from botik.app.webhook import WebhookServer
 from botik.config import Settings
 from botik.domain.messages import InboundMessage
 
@@ -40,6 +41,7 @@ def build_app(settings: Settings) -> App:
         language=settings.whisper_language,
         denoise=settings.whisper_denoise,
     )
+    webhooks = WebhookServer("0.0.0.0", settings.webhook_port)
     router = ChannelRouter(
         (
             TelegramMessenger(
@@ -48,6 +50,8 @@ def build_app(settings: Settings) -> App:
                 dialogues=storage.dialogues,
                 content_dir=settings.content_dir,
                 base_domain=settings.base_domain,
+                webhooks=webhooks,
+                webhook_secret=settings.webhook_secret,
             ),
             MaxMessenger(
                 settings.max_token,
@@ -55,8 +59,11 @@ def build_app(settings: Settings) -> App:
                 dialogues=storage.dialogues,
                 content_dir=settings.content_dir,
                 base_domain=settings.base_domain,
+                webhooks=webhooks,
+                webhook_secret=settings.webhook_secret,
             ),
-        )
+        ),
+        webhooks,
     )
     graph = Graph(
         storage.dialogues,

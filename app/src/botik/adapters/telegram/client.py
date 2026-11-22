@@ -1,26 +1,34 @@
 """Приём и ответы Telegram.
 
 Текст, голос и картинки уходят в общий приёмник, тот же, что у MAX.
-Ответ уходит в тот же чат и ссылается на сообщение человека.
+Telegram присылает их на /telegram. Ответ уходит в тот же чат.
 """
 
 import asyncio
+import hmac
+import json
 import logging
+import re
 import tempfile
 from pathlib import Path
+from typing import Any
 
-from telegram import KeyboardButton, Message, ReplyKeyboardMarkup, ReplyParameters, Update, User
-from telegram.ext import Application, ContextTypes, MessageHandler, Updater, filters
+from telegram import Bot, KeyboardButton, Message, ReplyKeyboardMarkup, ReplyParameters, Update, User
 
 from botik.adapters.content import image_suffix, stored_image
-from botik.ports.repos import DialogueRepository
 from botik.app.intake import accept, preview
 from botik.app.speech import render_speech
+from botik.app.webhook import WebhookServer, webhook_url
 from botik.domain.messages import Channel, InboundMessage, OutboundMessage
 from botik.ports.messenger import MessageHandler as InboundHandler
+from botik.ports.repos import DialogueRepository
 from botik.ports.transcriber import Transcriber
 
 logger = logging.getLogger(__name__)
+
+_PATH = "/telegram"
+_SECRET_HEADER = "x-telegram-bot-api-secret-token"
+_SECRET = re.compile(r"[A-Za-z0-9_-]{5,256}")
 
 
 class TelegramMessenger:
@@ -34,6 +42,8 @@ class TelegramMessenger:
         dialogues: DialogueRepository | None = None,
         content_dir: Path | None = None,
         base_domain: str | None = None,
+        webhooks: WebhookServer | None = None,
+        webhook_secret: str | None = None,
     ) -> None:
         self._token = token
         self._handler: InboundHandler | None = None
@@ -41,7 +51,10 @@ class TelegramMessenger:
         self._dialogues = dialogues
         self._content_dir = content_dir
         self._base_domain = base_domain
-        self._bot = None
+        self._webhooks = webhooks
+        self._secret = _usable_secret(webhook_secret)
+        self._bot: Bot | None = None
+        self._tasks: set[asyncio.Task[None]] = set()
 
     @property
     def enabled(self) -> bool:
@@ -51,29 +64,22 @@ class TelegramMessenger:
         self._handler = handler
 
     async def run(self) -> None:
-        if self._token is None:
+        if self._token is None or self._webhooks is None:
             return
         logging.getLogger("httpx").setLevel(logging.WARNING)
         logging.getLogger("httpcore").setLevel(logging.WARNING)
         logging.getLogger("telegram").setLevel(logging.WARNING)
-
-        application = Application.builder().token(self._token).build()
-        application.add_handler(MessageHandler(filters.ALL, self._on_update))
-        async with application:
-            self._bot = application.bot
-            updater = application.updater
-            if updater is None:
-                raise RuntimeError("telegram updater is unavailable")
-            await updater.start_polling(allowed_updates=["message"])
-            await application.start()
-            logger.info("telegram polling started")
-            try:
-                await asyncio.Event().wait()
-            except asyncio.CancelledError:
-                await _stop(application, updater)
-                raise
-            finally:
-                self._bot = None
+        bot = Bot(self._token)
+        await bot.initialize()
+        self._bot = bot
+        self._webhooks.add(_PATH, self._receive)
+        try:
+            await self._webhooks.ready.wait()
+            await self._register()
+            await self._webhooks.stopped.wait()
+        finally:
+            await bot.shutdown()
+            self._bot = None
 
     async def send(self, message: OutboundMessage) -> None:
         if self._bot is None:
@@ -94,10 +100,49 @@ class TelegramMessenger:
             reply_markup=markup,
         )
 
+    async def _register(self) -> None:
+        if self._bot is None:
+            return
+        await self._bot.delete_webhook(drop_pending_updates=True)
+        logger.info("telegram webhook cleared")
+        url = webhook_url(self._base_domain, _PATH)
+        if url is None:
+            logger.error("telegram webhook skipped: BOTIK_BASE_DOMAIN is empty")
+            return
+        await self._bot.set_webhook(
+            url=url,
+            secret_token=self._secret,
+            allowed_updates=["message"],
+        )
+        logger.info("telegram webhook %s", url)
+
+    async def _receive(self, headers: dict[str, str], body: bytes) -> int:
+        if not _secret_matches(headers.get(_SECRET_HEADER), self._secret):
+            return 401
+        if self._bot is None:
+            return 500
+        try:
+            payload = json.loads(body)
+            update = Update.de_json(payload, self._bot)
+        except (json.JSONDecodeError, ValueError):
+            logger.exception("telegram webhook payload")
+            return 400
+        if update is not None:
+            task = asyncio.create_task(self._deliver(update))
+            self._tasks.add(task)
+            task.add_done_callback(self._tasks.discard)
+        return 200
+
+    async def _deliver(self, update: Update) -> None:
+        try:
+            await self._on_update(update, _Context(self._bot))
+        except Exception:
+            logger.exception("telegram update failed")
+
     async def _keep_image(
         self,
         message: Message,
-        context: ContextTypes.DEFAULT_TYPE | None,
+        context: Any,
         inbound: InboundMessage,
     ) -> InboundMessage:
         source = _image_source(message)
@@ -125,7 +170,7 @@ class TelegramMessenger:
             suffix,
         )
 
-    async def _on_update(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    async def _on_update(self, update: Update, context: Any) -> None:
         inbound = inbound_message(update)
         if inbound is None or update.message is None or update.effective_user is None:
             return
@@ -184,7 +229,7 @@ def _tags(message: Message) -> list[str]:
     return tags
 
 
-async def _audio_path(message: Message, context: ContextTypes.DEFAULT_TYPE | None) -> Path | None:
+async def _audio_path(message: Message, context: Any) -> Path | None:
     source = message.voice or message.audio
     if source is None or context is None:
         return None
@@ -210,10 +255,20 @@ def _user_label(user: User) -> str:
     return user.full_name
 
 
-async def _stop(application: Application, updater: Updater) -> None:
-    task = asyncio.current_task()
-    if task is not None:
-        while task.uncancel():
-            pass
-    await updater.stop()
-    await application.stop()
+class _Context:
+    def __init__(self, bot: Bot | None) -> None:
+        self.bot = bot
+
+
+def _usable_secret(secret: str | None) -> str | None:
+    if secret and _SECRET.fullmatch(secret):
+        return secret
+    if secret:
+        logger.error("telegram webhook secret must be 5-256 chars of A-Z, a-z, 0-9, _ and -")
+    return None
+
+
+def _secret_matches(got: str | None, expected: str | None) -> bool:
+    if not expected:
+        return True
+    return bool(got) and hmac.compare_digest(got, expected)

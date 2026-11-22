@@ -1,4 +1,4 @@
-"""Приём сообщений MAX через long polling.
+"""Приём сообщений MAX через вебхук.
 
 Текст, голос и картинки приходят в тот же приёмник, что и Telegram.
 TLS MAX выпущен Минцифры, поэтому к обычным CA добавлены их корневой
@@ -6,7 +6,10 @@ TLS MAX выпущен Минцифры, поэтому к обычным CA д�
 """
 
 import asyncio
+import hmac
+import json
 import logging
+import re
 import ssl
 import tempfile
 from pathlib import Path
@@ -15,14 +18,19 @@ from typing import Any
 import httpx
 
 from botik.adapters.content import image_suffix, stored_image
-from botik.ports.repos import DialogueRepository
 from botik.app.intake import accept, preview
 from botik.app.speech import render_speech
+from botik.app.webhook import WebhookServer, webhook_url
 from botik.domain.messages import Channel, InboundMessage, OutboundMessage
 from botik.ports.messenger import MessageHandler
+from botik.ports.repos import DialogueRepository
 from botik.ports.transcriber import Transcriber
 
 logger = logging.getLogger(__name__)
+
+_PATH = "/max"
+_SECRET_HEADER = "x-max-bot-api-secret"
+_SECRET = re.compile(r"[A-Za-z0-9_-]{5,256}")
 
 _API = "https://platform-api2.max.ru"
 _CERTS = Path(__file__).with_name("certs")
@@ -47,6 +55,8 @@ class MaxMessenger:
         dialogues: DialogueRepository | None = None,
         content_dir: Path | None = None,
         base_domain: str | None = None,
+        webhooks: WebhookServer | None = None,
+        webhook_secret: str | None = None,
     ) -> None:
         self._token = token
         self._handler: MessageHandler | None = None
@@ -54,7 +64,10 @@ class MaxMessenger:
         self._dialogues = dialogues
         self._content_dir = content_dir
         self._base_domain = base_domain
+        self._webhooks = webhooks
+        self._secret = _usable_secret(webhook_secret)
         self._http: httpx.AsyncClient | None = None
+        self._tasks: set[asyncio.Task[None]] = set()
 
     @property
     def enabled(self) -> bool:
@@ -64,7 +77,7 @@ class MaxMessenger:
         self._handler = handler
 
     async def run(self) -> None:
-        if self._token is None:
+        if self._token is None or self._webhooks is None:
             return
         logging.getLogger("httpx").setLevel(logging.WARNING)
         logging.getLogger("httpcore").setLevel(logging.WARNING)
@@ -76,34 +89,75 @@ class MaxMessenger:
             verify=_ssl_context(),
         ) as client:
             self._http = client
-            logger.info("max polling started")
-            marker: int | None = None
-            seen: set[str] = set()
+            self._webhooks.add(_PATH, self._receive)
             try:
-                await self._poll(client, marker, seen)
+                await self._webhooks.ready.wait()
+                await self._register()
+                await self._webhooks.stopped.wait()
             finally:
                 self._http = None
 
-    async def _poll(
-        self,
-        client: httpx.AsyncClient,
-        marker: int | None,
-        seen: set[str],
-    ) -> None:
-        while True:
-            try:
-                updates, marker = await _fetch(client, marker)
-            except asyncio.CancelledError:
-                raise
-            except PermissionError:
-                logger.error("max polling stopped: token rejected")
-                return
-            except httpx.HTTPError:
-                logger.exception("max poll failed")
-                await asyncio.sleep(2)
+    async def _register(self) -> None:
+        if self._http is None:
+            return
+        await self._clear_subscriptions()
+        url = webhook_url(self._base_domain, _PATH)
+        if url is None:
+            logger.error("max webhook skipped: BOTIK_BASE_DOMAIN is empty")
+            return
+        body: dict[str, Any] = {
+            "url": url,
+            "update_types": ["message_created", "message_edited"],
+        }
+        if self._secret:
+            body["secret"] = self._secret
+        created = await self._http.post("/subscriptions", json=body)
+        if created.status_code >= 400:
+            logger.error("max webhook rejected %s: %s", created.status_code, created.text)
+            return
+        logger.info("max webhook %s", url)
+
+    async def _clear_subscriptions(self) -> None:
+        if self._http is None:
+            return
+        found = await self._http.get("/subscriptions")
+        if found.status_code >= 400:
+            logger.warning("max subscriptions %s: %s", found.status_code, found.text)
+            return
+        payload = found.json()
+        items = payload.get("subscriptions") if isinstance(payload, dict) else None
+        if not isinstance(items, list):
+            return
+        for item in items:
+            previous = item.get("url") if isinstance(item, dict) else None
+            if not isinstance(previous, str) or not previous:
                 continue
-            for update in updates:
-                await self._on_update(update, seen)
+            removed = await self._http.request("DELETE", "/subscriptions", params={"url": previous})
+            if removed.status_code not in {200, 404}:
+                logger.warning("max unsubscribe %s %s: %s", previous, removed.status_code, removed.text)
+                continue
+            logger.info("max webhook cleared %s", previous)
+
+    async def _receive(self, headers: dict[str, str], body: bytes) -> int:
+        if not _secret_matches(headers.get(_SECRET_HEADER), self._secret):
+            return 401
+        try:
+            payload = json.loads(body)
+        except json.JSONDecodeError:
+            logger.exception("max webhook payload")
+            return 400
+        if not isinstance(payload, dict):
+            return 400
+        task = asyncio.create_task(self._deliver(payload))
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+        return 200
+
+    async def _deliver(self, update: dict[str, Any]) -> None:
+        try:
+            await self._on_update(update)
+        except Exception:
+            logger.exception("max update failed")
 
     async def send(self, message: OutboundMessage) -> None:
         if self._http is None:
@@ -295,6 +349,20 @@ def _user_label(sender: dict[str, Any]) -> str:
     return full or str(sender.get("user_id"))
 
 
+def _usable_secret(secret: str | None) -> str | None:
+    if secret and _SECRET.fullmatch(secret):
+        return secret
+    if secret:
+        logger.error("max webhook secret must be 5-256 chars of A-Z, a-z, 0-9, _ and -")
+    return None
+
+
+def _secret_matches(got: str | None, expected: str | None) -> bool:
+    if not expected:
+        return True
+    return bool(got) and hmac.compare_digest(got, expected)
+
+
 def _ssl_context() -> ssl.SSLContext:
     context = ssl.create_default_context()
     for path in sorted(_CERTS.glob("*.crt")):
@@ -302,27 +370,3 @@ def _ssl_context() -> ssl.SSLContext:
     return context
 
 
-async def _fetch(
-    client: httpx.AsyncClient,
-    marker: int | None,
-) -> tuple[list[dict[str, Any]], int | None]:
-    params: dict[str, int | str] = {
-        "timeout": 30,
-        "limit": 100,
-        "types": "message_created,message_edited",
-    }
-    if marker is not None:
-        params["marker"] = marker
-    response = await client.get("/updates", params=params)
-    if response.status_code == 401:
-        raise PermissionError("max token rejected")
-    response.raise_for_status()
-    payload = response.json()
-    if not isinstance(payload, dict):
-        raise httpx.HTTPError("max updates payload is not an object")
-    raw_updates = payload.get("updates") or []
-    updates = [item for item in raw_updates if isinstance(item, dict)]
-    next_marker = payload.get("marker")
-    if not isinstance(next_marker, int):
-        next_marker = marker
-    return updates, next_marker

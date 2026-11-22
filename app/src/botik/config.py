@@ -19,6 +19,8 @@ class Settings:
     nginx_rules_dir: Path = Path("nginx-rules")
     public_ip: str | None = None
     base_domain: str | None = None
+    webhook_port: int = 8080
+    webhook_secret: str | None = None
     whisper_model: str = "small"
     whisper_language: str | None = None
     whisper_denoise: bool = False
@@ -37,6 +39,8 @@ class Settings:
             nginx_rules_dir=Path(os.environ.get("NGINX_RULES_DIR", "nginx-rules")),
             public_ip=_optional("BOTIK_PUBLIC_IP"),
             base_domain=_optional("BOTIK_BASE_DOMAIN"),
+            webhook_port=_port("BOTIK_WEBHOOK_PORT", 8080),
+            webhook_secret=_optional("BOTIK_WEBHOOK_SECRET"),
             whisper_model=os.environ.get("WHISPER_MODEL", "small").strip() or "small",
             whisper_language=_optional("WHISPER_LANGUAGE"),
             whisper_denoise=_flag("WHISPER_DENOISE"),
@@ -46,6 +50,16 @@ class Settings:
 def _optional(name: str) -> str | None:
     value = os.environ.get(name, "").strip()
     return value or None
+
+
+def _port(name: str, default: int) -> int:
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
 
 
 def _flag(name: str) -> bool:
