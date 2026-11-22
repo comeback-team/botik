@@ -60,7 +60,7 @@ class StoryTest(unittest.TestCase):
     def test_slug_then_restart_returns_to_the_domain_question(self) -> None:
         reserved = advance(_dialogue(step=DialogueStep.ASK_SLUG), "Coffee", base_domain="example.com")
         self.assertEqual(reserved.dialogue.slug, "coffee")
-        self.assertIn("Вашим доменом будет coffee.example.com.", reserved.replies[0])
+        self.assertIn("Вашим доменом будет http://coffee.example.com.", reserved.replies[0])
         self.assertEqual(reserved.dialogue.step, DialogueStep.ASK_BRIEF)
 
         restarted = advance(reserved.dialogue, "Начать сначала")

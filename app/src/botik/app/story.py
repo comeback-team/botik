@@ -131,7 +131,7 @@ def _from_slug(dialogue: Dialogue, text: str, base_domain: str | None) -> StoryM
     except ValueError:
         return StoryMove(dialogue, ("Нужно короткое имя латиницей, цифрами и дефисом. " + _ASK_SLUG,))
     moved = dialogue.model_copy(update={"slug": slug, "step": DialogueStep.ASK_BRIEF})
-    return StoryMove(moved, (f"Вашим доменом будет {_address(slug, base_domain)}. " + _ASK_BRIEF,), reserve=True)
+    return StoryMove(moved, (f"Вашим доменом будет http://{_address(slug, base_domain)}. " + _ASK_BRIEF,), reserve=True)
 
 
 def _from_brief(dialogue: Dialogue, text: str) -> StoryMove:
