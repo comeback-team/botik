@@ -41,9 +41,16 @@ class _Catalog:
 _catalog = _Catalog(_TEMPLATES / "blocks")
 
 
-def render_instruction(data: dict[str, Any], *, site_id: str) -> str:
-    """Собрать HTML из словаря, который вернула модель."""
-
+def render_instruction(
+    data: dict[str, Any],
+    *,
+    site_id: str,
+    registry: "Any | None" = None,
+) -> str:
+    """Собрать HTML из словаря, который вернула модель.
+    Если передан registry — возвращает чистые ссылки на место масок <N>."""
+    if registry is not None:
+        data = registry.resolve_tree(data)
     structure = SiteStructure.model_validate(_fill(data))
     return _render(structure, site_id=site_id)
 
