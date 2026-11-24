@@ -13,6 +13,19 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 
 logger = logging.getLogger(__name__)
 
+_IMAGE_REF_RE = re.compile(
+    r"^(<\d+>"                          # маска <1> — если реплейс вдруг не сделали
+    r"|/media/[a-zA-Z0-9_.\-]{1,128}"   # наша сохранённая картинка
+    r"|https?://[^\s\"'<>\\]{1,250})$"  # чистая ссылка — вставлена ТОЛЬКО нашим resolve
+)
+
+def _clean_image_url(value: str) -> str:
+    """Модель не видит ссылок вовсе — она копирует только маски <N>.
+    Реальные ссылки появляются в полях исключительно после нашего реплейса."""
+    value = (value or "").strip()
+    return value if _IMAGE_REF_RE.match(value) else ""
+
+
 _COMPONENT_ID = r"^[a-z][a-z0-9_]{1,63}$"
 _ENDPOINT = r"^/[A-Za-z0-9_\-/]{1,120}$"
 _SUBMIT_ACTION = r"^[a-z][a-z0-9_]{1,79}$"
