@@ -6,7 +6,7 @@ from typing import Any
 
 from jinja2 import Environment, FileSystemLoader
 
-from botik.site.structure import InteractiveBlock, SiteStructure
+from botik.site.structure import InteractiveBlock, SiteStructure, parse_structure
 
 _ROOT = Path(__file__).parent
 _TEMPLATES = _ROOT / "templates"
@@ -41,10 +41,17 @@ class _Catalog:
 _catalog = _Catalog(_TEMPLATES / "blocks")
 
 
-def render_instruction(data: dict[str, Any], *, site_id: str) -> str:
-    """Собрать HTML из словаря, который вернула модель."""
-
-    structure = SiteStructure.model_validate(_fill(data))
+def render_instruction(
+    data: dict[str, Any],
+    *,
+    site_id: str,
+    registry: "Any | None" = None,
+) -> str:
+    """Собрать HTML из словаря, который вернула модель.
+    Если передан registry — возвращает чистые ссылки на место масок <N>."""
+    if registry is not None:
+        data = registry.resolve_tree(data)
+    structure = parse_structure(_fill(data))   # CHANGED — автопочинка вместо голого model_validate
     return _render(structure, site_id=site_id)
 
 

@@ -13,6 +13,19 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 
 logger = logging.getLogger(__name__)
 
+_IMAGE_REF_RE = re.compile(
+    r"^(<\d+>"                          # маска <1> — если реплейс вдруг не сделали
+    r"|/media/[a-zA-Z0-9_.\-]{1,128}"   # наша сохранённая картинка
+    r"|https?://[^\s\"'<>\\]{1,250})$"  # чистая ссылка — вставлена ТОЛЬКО нашим resolve
+)
+
+def _clean_image_url(value: str) -> str:
+    """Модель не видит ссылок вовсе — она копирует только маски <N>.
+    Реальные ссылки появляются в полях исключительно после нашего реплейса."""
+    value = (value or "").strip()
+    return value if _IMAGE_REF_RE.match(value) else ""
+
+
 _COMPONENT_ID = r"^[a-z][a-z0-9_]{1,63}$"
 _ENDPOINT = r"^/[A-Za-z0-9_\-/]{1,120}$"
 _SUBMIT_ACTION = r"^[a-z][a-z0-9_]{1,79}$"
@@ -178,7 +191,13 @@ class HeroBlock(BlockBase):
     title: str = Field(min_length=1, max_length=120)
     subtitle: str = Field("", max_length=240)
     cta_text: str = Field("Оставить заявку", max_length=40)
+    image_url: str = Field("", max_length=300)  # NEW
     highlights: list[str] = Field(default_factory=list, max_length=3)
+
+    @field_validator("image_url")  # NEW
+    @classmethod
+    def _image_clean(cls, value: str) -> str:
+        return _clean_image_url(value)
 
 
 class TextBlock(BlockBase):
@@ -205,6 +224,12 @@ class GalleryItem(BaseModel):
 
     caption: str = Field(max_length=80)
     alt: str = Field("", max_length=120)
+    image_url: str = Field("", max_length=300)  # NEW
+
+    @field_validator("image_url")  # NEW
+    @classmethod
+    def _image_clean(cls, value: str) -> str:
+        return _clean_image_url(value)
 
 
 class GalleryBlock(BlockBase):
@@ -484,6 +509,7 @@ def _default_fill(block_type: str, business: str) -> dict[str, Any]:
             "title": business,
             "subtitle": "",
             "cta_text": "Оставить заявку",
+            "image_url": "",
         },
         BlockType.TEXT: {
             "title": "О нас",
@@ -525,6 +551,12 @@ def _component_valid(component: Any) -> bool:
     return True
 
 
+def _prune_block(block: dict[str, Any], model: type[BaseModel]) -> dict[str, Any]:  # NEW
+    """Выкинуть ключи, которых нет в модели блока."""
+    allowed = set(model.model_fields.keys())
+    return {key: value for key, value in block.items() if key in allowed}
+
+
 def _repair_block(block: Any, business: str) -> dict[str, Any] | None:
     """Валидный блок вернуть как есть, дырявый подлатать, безнадёжный отбросить."""
     if not isinstance(block, dict):
@@ -532,18 +564,33 @@ def _repair_block(block: Any, business: str) -> dict[str, Any] | None:
     kind = block.get("type")
     if isinstance(kind, str):
         kind = kind.strip().lower()
-    if _BLOCK_MODELS.get(kind) is None:
+    model = _BLOCK_MODELS.get(kind)
+    if model is None:
         return None
-    patched = dict(block)
-    if patched.get("type") != kind:
-        patched["type"] = kind
+    patched = _prune_block(dict(block), model)          # NEW — вырезаем лишние ключи
+    patched["type"] = kind
     if kind == BlockType.INTERACTIVE and isinstance(patched.get("components"), list):
-        patched["components"] = [item for item in patched["components"] if _component_valid(item)]
+        pruned: list[Any] = []                          # NEW — чистим компоненты
+        for item in patched["components"]:
+            if not isinstance(item, dict):
+                continue
+            ctype = str(item.get("type", "")).strip().lower()
+            cmodel = _COMPONENT_MODELS.get(ctype)
+            if cmodel is None:
+                continue
+            candidate = _prune_block(dict(item), cmodel)
+            candidate["type"] = ctype
+            try:
+                cmodel.model_validate(candidate)
+            except ValidationError:
+                continue
+            pruned.append(candidate)
+        patched["components"] = pruned
     for name, value in _default_fill(kind, business).items():
         if patched.get(name) in (None, "", []):
             patched[name] = value
     try:
-        _BLOCK_MODELS[kind].model_validate(patched)
+        model.model_validate(patched)
     except ValidationError:
         return None
     return patched

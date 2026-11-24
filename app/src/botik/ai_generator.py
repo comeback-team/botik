@@ -146,7 +146,8 @@ def _credentials() -> str:
         return base64.b64encode(raw).decode()
     raise RuntimeError(
         "Нет ключа GigaChat. Задайте GIGACHAT_CREDENTIALS "
-        "или пару GIGACHAT_CLIENT_ID и GIGACHAT_CLIENT_SECRET."
+        "(Authorization key из кабинета) или пару "
+        "GIGACHAT_CLIENT_ID и GIGACHAT_CLIENT_SECRET."
     )
 
 
@@ -175,13 +176,26 @@ def modify_site(
         Кортеж (новая_структура_dict, info): info["status"] — "ok" или "error",
         при ошибке добавляются info["error"] и details для валидации.
     """
+    # 1. Собираем запрос
     try:
         request = build_modify_request(current_structure, instruction)
     except ValueError as exc:
         logger.error("Ошибка сборки запроса на модификацию: %s", exc)
         return current_structure, {"status": "error", "error": str(exc)}
-    
 
+    # 2. Идём в GigaChat (complete сам делает fallback json_schema → json_object)
+    try:
+        result = complete(
+            request.system,
+            request.user,
+            response_format=request.response_format,
+        )
+    except Exception as exc:
+        logger.error("Ошибка запроса к GigaChat: %s", exc)
+        return current_structure, {"status": "error", "error": str(exc)}
+
+    # 3. Разбираем ответ (с автопочинкой)
+    try:
         structure = parse_structure(result)
         return structure.model_dump(), {"status": "ok"}
     except ValidationError as exc:
