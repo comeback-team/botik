@@ -47,7 +47,10 @@ def _collapse(node: Any) -> Any:
     if not isinstance(node, dict):
         return node
     node = {key: _collapse(value) for key, value in node.items()}
-    # НЕ превращаем oneOf в anyOf — оставляем как есть
+    discriminator = node.get("discriminator")
+    
+    if isinstance(discriminator, dict):
+        node["discriminator"] = {"propertyName": discriminator.get("propertyName", "type")}
     if "const" in node:
         node["enum"] = [node.pop("const")]
     node = {key: value for key, value in node.items() if key not in _UNSUPPORTED}

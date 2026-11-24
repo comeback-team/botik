@@ -17,9 +17,7 @@ from gigachat.models import Chat, Messages, MessagesRole
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from botik.site.request import build_modify_request
-from botik.site.structure import SiteStructure
-from botik.site.token_counter import estimate_request_tokens, estimate_response_tokens
-
+from botik.site.structure import SiteStructure, parse_structure
 
 _SCOPE = "GIGACHAT_API_PERS"
 _MODEL = "GigaChat-2"
@@ -172,14 +170,10 @@ def modify_site(
     instruction: str,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Модифицировать существующую структуру сайта по инструкции пользователя.
-    
-    Args:
-        current_structure: текущая структура сайта (dict)
-        instruction: инструкция от пользователя
-    
+
     Returns:
-        Кортеж (новая_структура_dict, token_info)
-        token_info содержит информацию об использованных токенах
+        Кортеж (новая_структура_dict, info): info["status"] — "ok" или "error",
+        при ошибке добавляются info["error"] и details для валидации.
     """
     try:
         request = build_modify_request(current_structure, instruction)
@@ -187,47 +181,15 @@ def modify_site(
         logger.error("Ошибка сборки запроса на модификацию: %s", exc)
         return current_structure, {"status": "error", "error": str(exc)}
     
-    # Оценка токенов до запроса
-    input_tokens = estimate_request_tokens(request.system, request.user, request.response_format)
-    
-    try:
-        result = complete(
-            system=request.system,
-            user=request.user,
-            response_format=request.response_format,
-        )
-        
-        # Валидация ответа
-        structure = SiteStructure.model_validate(result)
-        output_tokens = estimate_response_tokens(result)
-        
-        return (
-            structure.model_dump(),
-            {
-                "status": "ok",
-                "input_tokens": input_tokens,
-                "output_tokens": output_tokens,
-                "total_tokens": input_tokens + output_tokens,
-            },
-        )
+
+        structure = parse_structure(result)
+        return structure.model_dump(), {"status": "ok"}
     except ValidationError as exc:
         logger.error("Ответ модели не прошёл валидацию: %s", exc)
         return (
             current_structure,
-            {
-                "status": "error",
-                "error": "validation_failed",
-                "details": str(exc),
-                "input_tokens": input_tokens,
-            },
+            {"status": "error", "error": "validation_failed", "details": str(exc)},
         )
     except Exception as exc:
         logger.error("Ошибка модификации сайта: %s", exc)
-        return (
-            current_structure,
-            {
-                "status": "error",
-                "error": str(exc),
-                "input_tokens": input_tokens,
-            },
-        )
+        return current_structure, {"status": "error", "error": str(exc)}

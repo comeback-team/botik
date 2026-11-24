@@ -1,7 +1,6 @@
-"""Тест модификации сайта и подсчёта токенов."""
+"""Тест модификации сайта"""
 import json
 from botik.site.ai_generator import modify_site
-from botik.site.token_counter import estimate_tokens, format_token_usage
 
 # Пример текущей структуры
 current_structure = {
@@ -29,14 +28,7 @@ print("=" * 70)
 print(f"\nИНСТРУКЦИЯ: {instruction}")
 print("=" * 70)
 
-new_structure, token_info = modify_site(current_structure, instruction)
+new_structure = modify_site(current_structure, instruction)
 
 print("\nНОВАЯ СТРУКТУРА:")
 print(json.dumps(new_structure, ensure_ascii=False, indent=2))
-
-print("\n" + "=" * 70)
-print("ИНФОРМАЦИЯ О ТОКЕНАХ:")
-print(json.dumps(token_info, ensure_ascii=False, indent=2))
-
-if token_info.get("status") == "ok":
-    print(f"\n{format_token_usage(token_info['input_tokens'], token_info['output_tokens'], token_info['total_tokens'])}")

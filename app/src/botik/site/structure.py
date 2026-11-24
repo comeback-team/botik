@@ -3,13 +3,15 @@
 Это не вёрстка. Модель заполняет блоки, тексты и компоненты,
 а HTML из этой структуры собирается отдельно.
 """
-
+import logging
 import re
 from enum import StrEnum
 from typing import Annotated, Any, Literal, Union
 
 from annotated_types import MaxLen
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
+
+logger = logging.getLogger(__name__)
 
 _COMPONENT_ID = r"^[a-z][a-z0-9_]{1,63}$"
 _ENDPOINT = r"^/[A-Za-z0-9_\-/]{1,120}$"
@@ -443,3 +445,145 @@ class SiteStructure(BaseModel):
                 component.id = candidate
                 used.add(candidate)
         return self
+
+_COMPONENT_MODELS: dict[str, type[A2UIComponent]] = {
+    ComponentType.TEXT_INPUT: TextInput,
+    ComponentType.NUMBER_STEPPER: NumberStepper,
+    ComponentType.SELECT_OPTIONS: SelectOptions,
+    ComponentType.ACTION_BUTTON: ActionButton,
+}
+
+_BLOCK_MODELS: dict[str, type[BaseModel]] = {
+    BlockType.HEADER: HeaderBlock,
+    BlockType.HERO: HeroBlock,
+    BlockType.TEXT: TextBlock,
+    BlockType.FEATURES: FeaturesBlock,
+    BlockType.GALLERY: GalleryBlock,
+    BlockType.INTERACTIVE: InteractiveBlock,
+    BlockType.FAQ: FaqBlock,
+    BlockType.FOOTER: FooterBlock,
+    BlockType.STATS: StatsBlock,
+    BlockType.PRICING: PricingBlock,
+    BlockType.TESTIMONIALS: TestimonialsBlock,
+    BlockType.STEPS: StepsBlock,
+    BlockType.CTA: CtaBlock,
+    BlockType.CONTACTS: ContactsBlock,
+    BlockType.TEAM: TeamBlock,
+    BlockType.MENU: MenuBlock,
+}
+
+
+def _default_fill(block_type: str, business: str) -> dict[str, Any]:
+    """Значения для полей, которые модель чаще всего забывает."""
+    table: dict[str, dict[str, Any]] = {
+        BlockType.HEADER: {
+            "logo_text": business,
+            "menu": ["Главная", "Услуги", "Контакты"],
+        },
+        BlockType.HERO: {
+            "title": business,
+            "subtitle": "",
+            "cta_text": "Оставить заявку",
+        },
+        BlockType.TEXT: {
+            "title": "О нас",
+            "content": f"{business}: работаем для вас каждый день.",
+        },
+        BlockType.CTA: {
+            "title": f"{business} — оставьте заявку прямо сейчас",
+            "subtitle": "",
+            "button_text": "Оставить заявку",
+        },
+        BlockType.INTERACTIVE: {
+            "title": "Оставьте заявку",
+            "submit_action": "send_lead",
+            "components": [
+                {
+                    "type": "text_input",
+                    "id": "phone_number",
+                    "label": "Телефон",
+                    "placeholder": "+7 900 000-00-00",
+                    "required": True,
+                }
+            ],
+        },
+    }
+    return table.get(block_type, {})
+
+
+def _component_valid(component: Any) -> bool:
+    """Проверить компонент интерактивного блока по его дискриминатору."""
+    if not isinstance(component, dict):
+        return False
+    model = _COMPONENT_MODELS.get(str(component.get("type", "")).strip().lower())
+    if model is None:
+        return False
+    try:
+        model.model_validate(component)
+    except ValidationError:
+        return False
+    return True
+
+
+def _repair_block(block: Any, business: str) -> dict[str, Any] | None:
+    """Валидный блок вернуть как есть, дырявый подлатать, безнадёжный отбросить."""
+    if not isinstance(block, dict):
+        return None
+    kind = block.get("type")
+    if isinstance(kind, str):
+        kind = kind.strip().lower()
+    if _BLOCK_MODELS.get(kind) is None:
+        return None
+    patched = dict(block)
+    if patched.get("type") != kind:
+        patched["type"] = kind
+    if kind == BlockType.INTERACTIVE and isinstance(patched.get("components"), list):
+        patched["components"] = [item for item in patched["components"] if _component_valid(item)]
+    for name, value in _default_fill(kind, business).items():
+        if patched.get(name) in (None, "", []):
+            patched[name] = value
+    try:
+        _BLOCK_MODELS[kind].model_validate(patched)
+    except ValidationError:
+        return None
+    return patched
+
+
+def _repair_colors(colors: Any) -> dict[str, str]:
+    result = {"primary": "#2563EB", "secondary": "#F59E0B"}
+    if isinstance(colors, dict):
+        for key in ("primary", "secondary"):
+            value = colors.get(key)
+            if isinstance(value, str) and re.fullmatch(r"#[0-9A-Fa-f]{6}", value.strip()):
+                result[key] = value.strip()
+    return result
+
+
+def repair_structure(data: Any) -> dict[str, Any]:
+    """Подлатать сырой ответ модели так, чтобы SiteStructure его принял.
+
+    GigaChat иногда присылает блоки без обязательных полей (header только
+    с type и variant). Дыры закрываем значениями по умолчанию, безнадёжные
+    блоки отбрасываем: лучше сайт без одного блока, чем падение генерации.
+    """
+    if not isinstance(data, dict):
+        raise ValueError("Ожидался JSON-объект")
+    fixed = dict(data)
+    business = _clip_words(str(fixed.get("business_type") or "").strip() or "Наша компания", 100)
+    raw_blocks = fixed.get("blocks")
+    blocks = raw_blocks if isinstance(raw_blocks, list) else []
+    fixed["business_type"] = business
+    fixed["blocks"] = [item for item in (_repair_block(block, business) for block in blocks) if item is not None]
+    if not str(fixed.get("tone") or "").strip():
+        fixed["tone"] = "дружелюбный"
+    fixed["colors"] = _repair_colors(fixed.get("colors"))
+    return fixed
+
+
+def parse_structure(data: Any) -> SiteStructure:
+    """Разобрать ответ модели: сначала строго, при ошибке — с автопочинкой."""
+    try:
+        return SiteStructure.model_validate(data)
+    except ValidationError as exc:
+        logger.warning("Ответ модели с дефектами (%s шт.), чиним", exc.error_count())
+        return SiteStructure.model_validate(repair_structure(data))
