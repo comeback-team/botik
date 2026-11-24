@@ -1,67 +1,79 @@
-"""Парсинг брифа: токены чувствительных данных и заранее сохранённое соответствие
-«токен → ссылка/значение».  картинки сохраняются раньше
-по пайплайну, сюда приезжает уже готовая публичная ссылка."""
+"""Парсинг брифа: маскирование {{img:http://...}} → <1>, сохранение соответствия
+«маска → чистая ссылка» и возврат ссылок реплейсом перед рендером."""
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
 from typing import Any
 
-_TOKEN_RE = re.compile(r"\{\{(img|photo|image|phone|email|address):(\d+)\}\}", re.IGNORECASE)
+# {{img:http://...}}, {{phone:+7 900...}}, {{email:a@b.ru}} — содержимое любое, кроме скобок
+_SENSITIVE_RE = re.compile(
+    r"\{\{(img|photo|image|phone|email|address):([^{}]+)\}\}",
+    re.IGNORECASE,
+)
+_MASK_RE = re.compile(r"<(\d+)>")
 
 
 @dataclass
 class RegistryItem:
-    token: str
-    kind: str
-    value: str = ""    # то, что передал пользователь / источник
-    public: str = ""   # то, что подставится в структуру (готовая ссылка или значение)
+    original: str      # "{{img:http://site.ru/a.jpg}}" — как пришло
+    kind: str          # "img" | "phone" | "email" | "address"
+    link: str          # "http://site.ru/a.jpg" — чистая ссылка из токена
+    mask: str          # "<1>" — что видит модель
+    public: str = ""   # итоговая ссылка (если картинку сохранили в media, иначе = link)
 
 
 @dataclass
 class BriefRegistry:
-    """Короткая спец-подставка в полях + сохранённое соответствие ссылкам."""
+    by_token: dict[str, RegistryItem] = field(default_factory=dict)
+    by_mask: dict[str, RegistryItem] = field(default_factory=dict)
+    _counter: int = 0
 
-    items: dict[str, RegistryItem] = field(default_factory=dict)
+    def mask(self, brief: str) -> str:
+        """{{img:http://...}} → <1>. Дубли одного токена получают одну маску."""
+        def _sub(match: re.Match[str]) -> str:
+            token = match.group(0)
+            item = self.by_token.get(token)
+            if item is None:
+                self._counter += 1
+                item = RegistryItem(
+                    original=token,
+                    kind=match.group(1).lower(),
+                    link=match.group(2).strip(),
+                    mask=f"<{self._counter}>",
+                )
+                self.by_token[token] = item
+                self.by_mask[item.mask] = item
+            return item.mask
 
-    def scan(self, brief: str) -> str:
-        """Находит {{kind:N}} в брифе и регистрирует пустые слоты (бриф не меняет)."""
-        for match in _TOKEN_RE.finditer(brief):
-            kind, num = match.group(1).lower(), match.group(2)
-            token = f"{{{{{kind}:{num}}}}}"
-            self.items.setdefault(token, RegistryItem(token=token, kind=kind))
-        return brief
+        return _SENSITIVE_RE.sub(_sub, brief)
 
-    def bind(self, token: str, public: str, *, source: str = "") -> None:
-        """заранее сохранить соответствие «токен → ссылка/значение».
-        Вызывает код выше по пайплайну, который уже сохранил картинку:
-        registry.bind("{{img:1}}", "/media/img1_ab12cd34ef.jpg")."""
-        kind = token.strip("{}").split(":", 1)[0].lower()
-        item = self.items.get(token) or RegistryItem(token=token, kind=kind)
-        self.items[token] = item
-        item.public = public
-        if source:
-            item.value = source
+    def bind(self, mask: str, public: str) -> None:
+        """Код ВЫШЕ по пайплайну сохранил картинку: registry.bind('<1>', '/media/img1_hash.jpg')."""
+        item = self.by_mask.get(mask)
+        if item is not None:
+            item.public = public
 
     def resolve(self, text: str) -> str:
-        """Заменяет токены на сохранённые значения; НЕИЗВЕСТНЫЕ токены гасит в ""."""
-        if not isinstance(text, str) or "{" not in text:
+        """Возвращает чистые ссылки на место масок. Неизвестные <N> гасятся в ''."""
+        if not isinstance(text, str) or "<" not in text:
             return text
 
         def _sub(match: re.Match[str]) -> str:
-            item = self.items.get(match.group(0))
-            return (item.public or item.value) if item else ""
+            item = self.by_mask.get(match.group(0))
+            if item is None:
+                return ""
+            return item.public or item.link
 
-        return _TOKEN_RE.sub(_sub, text)
+        return _MASK_RE.sub(_sub, text)
 
-
-def resolve_tree(node: Any, registry: BriefRegistry) -> Any:
-    """Обход структуры словарем и подстановка всех токенов ( «реплейс»).
-    Вызывать ДО render_instruction."""
-    if isinstance(node, dict):
-        return {k: resolve_tree(v, registry) for k, v in node.items()}
-    if isinstance(node, list):
-        return [resolve_tree(v, registry) for v in node]
-    if isinstance(node, str):
-        return registry.resolve(node)
-    return node
+    def resolve_tree(self, node: Any) -> Any:
+        """Рекурсивный реплейс масок во всём словаре ответа модели.
+        Вызывать ДО render_instruction."""
+        if isinstance(node, dict):
+            return {k: self.resolve_tree(v) for k, v in node.items()}
+        if isinstance(node, list):
+            return [self.resolve_tree(v) for v in node]
+        if isinstance(node, str):
+            return self.resolve(node)
+        return node
