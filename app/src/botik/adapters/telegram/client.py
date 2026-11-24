@@ -12,6 +12,8 @@ from pathlib import Path
 from telegram import KeyboardButton, Message, ReplyKeyboardMarkup, ReplyParameters, Update, User
 from telegram.ext import Application, ContextTypes, MessageHandler, Updater, filters
 
+from botik.adapters.content import image_suffix, stored_image
+from botik.ports.repos import DialogueRepository
 from botik.app.intake import accept, preview
 from botik.app.speech import render_speech
 from botik.domain.messages import Channel, InboundMessage, OutboundMessage
@@ -24,10 +26,21 @@ logger = logging.getLogger(__name__)
 class TelegramMessenger:
     channel = Channel.TELEGRAM
 
-    def __init__(self, token: str | None, transcriber: Transcriber | None = None) -> None:
+    def __init__(
+        self,
+        token: str | None,
+        transcriber: Transcriber | None = None,
+        *,
+        dialogues: DialogueRepository | None = None,
+        content_dir: Path | None = None,
+        base_domain: str | None = None,
+    ) -> None:
         self._token = token
         self._handler: InboundHandler | None = None
         self._transcriber = transcriber
+        self._dialogues = dialogues
+        self._content_dir = content_dir
+        self._base_domain = base_domain
         self._bot = None
 
     @property
@@ -81,6 +94,37 @@ class TelegramMessenger:
             reply_markup=markup,
         )
 
+    async def _keep_image(
+        self,
+        message: Message,
+        context: ContextTypes.DEFAULT_TYPE | None,
+        inbound: InboundMessage,
+    ) -> InboundMessage:
+        source = _image_source(message)
+        if source is None or context is None:
+            return inbound
+        suffix = image_suffix(getattr(source, "file_name", None))
+        handle = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
+        handle.close()
+        path = Path(handle.name)
+        try:
+            tg_file = await context.bot.get_file(source.file_id)
+            await tg_file.download_to_drive(path)
+            data = path.read_bytes()
+        except Exception:
+            logger.exception("telegram image download failed")
+            return inbound
+        finally:
+            path.unlink(missing_ok=True)
+        return await stored_image(
+            inbound,
+            self._dialogues,
+            self._content_dir,
+            self._base_domain,
+            data,
+            suffix,
+        )
+
     async def _on_update(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         inbound = inbound_message(update)
         if inbound is None or update.message is None or update.effective_user is None:
@@ -88,6 +132,7 @@ class TelegramMessenger:
         tags = _tags(update.message)
         audio = await _audio_path(update.message, context)
         inbound, tags = await render_speech(inbound, tags, audio, self._transcriber)
+        inbound = await self._keep_image(update.message, context, inbound)
         await accept(
             self._handler,
             inbound,
@@ -109,6 +154,15 @@ def inbound_message(update: Update) -> InboundMessage | None:
         user_id=str(user.id),
         text=message.text if message.text is not None else message.caption,
     )
+
+
+def _image_source(message: Message):
+    if message.photo:
+        return message.photo[-1]
+    document = message.document
+    if document is not None and (document.mime_type or "").startswith("image/"):
+        return document
+    return None
 
 
 def _tags(message: Message) -> list[str]:

@@ -1,30 +1,84 @@
 """Страница и правило домена пишутся в каталоги, которые видит nginx."""
 
-import re
+import shutil
 from pathlib import Path
 
-from botik.domain.nginx import site_slug
+from botik.adapters.content import site_folder
+from botik.domain.nginx import base_host, is_domain, site_slug
 from botik.site.render import render_instruction
 
-_HOST = re.compile(r"^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$")
 _NGINX_ROOT = "/var/www/content"
 _PLACEHOLDER = "<!doctype html><meta charset=utf-8><title>Сайт собирается</title><p>Сайт собирается.</p>"
 
 
 def folder_name(host: str | None, slug: str | None) -> str:
-    if slug:
-        return site_slug(slug)
-    if host:
-        return site_slug(host.replace(".", "-"))
-    raise ValueError("нет имени для каталога сайта")
+    name = site_folder(host, slug)
+    if name is None:
+        raise ValueError("нет имени для каталога сайта")
+    return name
 
 
 def server_name(host: str | None, slug: str | None, base_domain: str | None) -> str | None:
-    if host and _HOST.fullmatch(host):
+    if host and is_domain(host):
         return host
-    if slug and base_domain and _HOST.fullmatch(f"{slug}.{base_domain}"):
-        return f"{slug}.{base_domain}"
+    root = base_host(base_domain)
+    if slug and root:
+        try:
+            name = f"{site_slug(slug)}.{root}"
+        except ValueError:
+            return None
+        if is_domain(name):
+            return name
     return None
+
+
+def owner_line(channel: str, chat_id: str) -> str:
+    safe = "".join(char if char.isalnum() or char in "-_" else "_" for char in chat_id)
+    return f"# botik {channel} {safe[:80] or 'x'}"
+
+
+def site_held(content_dir: Path, rules_dir: Path, domain: str) -> bool:
+    """Имя занято, если папка сайта есть или server_name уже встречается в правилах."""
+
+    if not is_domain(domain):
+        return False
+    if (content_dir / domain).exists():
+        return True
+    if not rules_dir.is_dir():
+        return False
+    needle = f"server_name {domain};"
+    for path in rules_dir.glob("*.conf"):
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        if needle in text:
+            return True
+    return False
+
+
+def site_owned_by(rules_dir: Path, domain: str, channel: str, chat_id: str) -> bool:
+    path = rules_dir / f"{domain}.conf"
+    if not is_domain(domain) or not path.is_file():
+        return False
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return False
+    return bool(lines) and lines[0] == owner_line(channel, chat_id)
+
+
+def release_site(content_dir: Path, rules_dir: Path, domain: str) -> None:
+    """Убрать правило и папку сайта, когда чат отпускает домен."""
+
+    if not is_domain(domain):
+        return
+    config = rules_dir / f"{domain}.conf"
+    if rules_dir.exists() and _inside(rules_dir, config):
+        config.unlink(missing_ok=True)
+    folder = content_dir / domain
+    if content_dir.exists() and folder.is_dir() and _inside(content_dir, folder):
+        shutil.rmtree(folder)
 
 
 def reserve_site(
@@ -33,15 +87,16 @@ def reserve_site(
     rules_dir: Path,
     folder: str,
     name: str | None,
+    owner: str | None = None,
 ) -> None:
-    """Пустая страница и, если имя известно, правило nginx."""
+    """Папка сайта и, если имя известно, правило nginx. Готовый index.html не трогаем."""
 
     root = content_dir / folder
     root.mkdir(parents=True, exist_ok=True)
     index = root / "index.html"
     if not index.exists():
         index.write_text(_PLACEHOLDER, encoding="utf-8")
-    _write_rule(rules_dir, folder, name)
+    _write_rule(rules_dir, folder, name, owner)
 
 
 def publish_html(
@@ -57,11 +112,13 @@ def publish_html(
     return path
 
 
-def _write_rule(rules_dir: Path, folder: str, name: str | None) -> None:
-    if name is None:
+def _write_rule(rules_dir: Path, folder: str, name: str | None, owner: str | None) -> None:
+    if name is None or not is_domain(name):
         return
     rules_dir.mkdir(parents=True, exist_ok=True)
+    comment = f"{owner}\n" if owner else ""
     config = (
+        f"{comment}"
         "server {\n"
         "    listen 80;\n"
         f"    server_name {name};\n"
@@ -70,3 +127,11 @@ def _write_rule(rules_dir: Path, folder: str, name: str | None) -> None:
         "}\n"
     )
     (rules_dir / f"{folder}.conf").write_text(config, encoding="utf-8")
+
+
+def _inside(root: Path, child: Path) -> bool:
+    try:
+        child.resolve().relative_to(root.resolve())
+    except ValueError:
+        return False
+    return True

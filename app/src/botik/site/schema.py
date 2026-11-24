@@ -48,7 +48,7 @@ def _collapse(node: Any) -> Any:
         return node
     node = {key: _collapse(value) for key, value in node.items()}
     discriminator = node.get("discriminator")
-    
+
     if isinstance(discriminator, dict):
         node["discriminator"] = {"propertyName": discriminator.get("propertyName", "type")}
     if "const" in node:

@@ -1,17 +1,25 @@
 <section id="s{{ idx }}" class="bg-base-200">
   <div class="hero min-h-[60vh] max-w-6xl mx-auto">
-    <div class="hero-content flex-col lg:flex-row-reverse gap-8 lg:gap-16 py-14 md:py-20 w-full max-w-full">
-      {% if block.highlights %}
-      <div class="stats stats-vertical sm:stats-horizontal shadow bg-base-100 w-full max-w-full">
-        {% for h in block.highlights %}
-        <div class="stat min-w-0">
-          <div class="stat-value text-primary text-2xl">✦</div>
-          <div class="stat-desc text-base [overflow-wrap:anywhere]">{{ h }}</div>
+    <div class="hero-content flex-col-reverse lg:flex-row-reverse gap-8 lg:gap-16 py-14 md:py-20 w-full max-w-full">
+      {% if block.image_url or block.highlights %}
+      <div class="flex flex-col gap-6 flex-1 min-w-0">
+        {% if block.image_url %}
+        <img src="{{ block.image_url }}" alt="{{ block.title }}"
+             class="w-full h-64 md:h-80 lg:h-96 object-cover rounded-2xl shadow-xl">
+        {% endif %}
+        {% if block.highlights %}
+        <div class="stats stats-vertical sm:stats-horizontal shadow bg-base-100 w-full max-w-full">
+          {% for h in block.highlights %}
+          <div class="stat min-w-0">
+            <div class="stat-value text-primary text-2xl">◆</div>
+            <div class="stat-desc text-base [overflow-wrap:anywhere]">{{ h }}</div>
+          </div>
+          {% endfor %}
         </div>
-        {% endfor %}
+        {% endif %}
       </div>
       {% endif %}
-      <div class="max-w-xl min-w-0">
+      <div class="max-w-xl min-w-0 flex-1">
         <h1 class="text-3xl md:text-5xl font-extrabold leading-tight [overflow-wrap:anywhere]">{{ block.title }}</h1>
         {% if block.subtitle %}<p class="py-6 text-base md:text-lg opacity-80 [overflow-wrap:anywhere]">{{ block.subtitle }}</p>{% endif %}
         <a href="{{ cta_anchor }}" class="btn btn-primary btn-lg whitespace-normal h-auto py-3 max-w-full">{{ block.cta_text }}</a>
