@@ -6,7 +6,7 @@ from typing import Any
 
 from jinja2 import Environment, FileSystemLoader
 
-from botik.site.structure import InteractiveBlock, SiteStructure
+from botik.site.structure import InteractiveBlock, SiteStructure, parse_structure
 from botik.site.brief_parser import BriefRegistry
 
 _ROOT = Path(__file__).parent
@@ -42,16 +42,18 @@ class _Catalog:
 _catalog = _Catalog(_TEMPLATES / "blocks")
 
 
+
 def render_instruction(
     data: dict[str, Any],
     *,
     site_id: str,
-    registry: "BriefRegistry",
+    registry: BriefRegistry,
 ) -> str:
     """Собрать HTML из словаря, который вернула модель.
     registry обязателен — без него маски <N> не заменятся на реальные данные."""
     data = registry.resolve_tree(data)
-    structure = SiteStructure.model_validate(_fill(data))
+    
+    structure = parse_structure(_fill(data))
     return _render(structure, site_id=site_id)
 
 
