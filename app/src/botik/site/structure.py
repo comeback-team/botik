@@ -30,6 +30,7 @@ _COMPONENT_ID = r"^[a-z][a-z0-9_]{1,63}$"
 _ENDPOINT = r"^/[A-Za-z0-9_\-/]{1,120}$"
 _SUBMIT_ACTION = r"^[a-z][a-z0-9_]{1,79}$"
 _HTML_TAG = re.compile(r"</?\s*[a-zA-Z][^>]*>")
+_CURLY_BRACES = re.compile(r"\{[^}]*\}")  # {icon:clock}, {value:...} и т.д.
 
 
 class ComponentType(StrEnum):
@@ -67,6 +68,8 @@ class BlockType(StrEnum):
 def _reject_html(value: str) -> str:
     if _HTML_TAG.search(value):
         raise ValueError(f"HTML запрещён в A2UI: {value!r}")
+    # Чистим фигурные скобки — модель не должна генерить {icon}, {value}
+    value = _CURLY_BRACES.sub("", value)
     return value.strip()
 
 
