@@ -170,31 +170,26 @@ def modify_site(
     current_structure: dict[str, Any],
     instruction: str,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Модифицировать существующую структуру сайта по инструкции пользователя.
-
-    Returns:
-        Кортеж (новая_структура_dict, info): info["status"] — "ok" или "error",
-        при ошибке добавляются info["error"] и details для валидации.
-    """
-    # 1. Собираем запрос
     try:
+        # Возвращаемся к json_schema — это единственный поддерживаемый формат
         request = build_modify_request(current_structure, instruction)
     except ValueError as exc:
         logger.error("Ошибка сборки запроса на модификацию: %s", exc)
         return current_structure, {"status": "error", "error": str(exc)}
 
-    # 2. Идём в GigaChat (complete сам делает fallback json_schema → json_object)
     try:
         result = complete(
             request.system,
             request.user,
             response_format=request.response_format,
         )
+        # Защита от пустого ответа (та самая ошибка role: Field required)
+        if not result:
+            raise ValueError("Модель вернула пустой ответ. Попробуйте упростить инструкцию.")
     except Exception as exc:
         logger.error("Ошибка запроса к GigaChat: %s", exc)
         return current_structure, {"status": "error", "error": str(exc)}
 
-    # 3. Разбираем ответ (с автопочинкой)
     try:
         structure = parse_structure(result)
         return structure.model_dump(), {"status": "ok"}
