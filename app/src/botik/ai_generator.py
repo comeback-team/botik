@@ -102,7 +102,6 @@ def _chat(system: str, user: str, response_format: dict[str, Any] | None) -> Cha
 
 def parse_json(raw: str) -> dict[str, Any]:
     """Достать объект из ответа: чистый JSON или блок ```json."""
-
     text = raw.strip()
     fenced = _JSON_FENCE.search(text)
     if fenced:
@@ -111,7 +110,26 @@ def parse_json(raw: str) -> dict[str, Any]:
         start, end = text.find("{"), text.rfind("}")
         if start != -1 and end > start:
             text = text[start : end + 1]
-    data = json.loads(text)
+
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as exc:
+        logger.warning("JSON от модели битый: %s. Пробуем восстановить...", exc)
+        
+        if not text.endswith("}"):
+            text += "}"
+        
+        open_braces = text.count("{")
+        close_braces = text.count("}")
+        if open_braces > close_braces:
+            text += "}" * (open_braces - close_braces)
+            
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError:
+            logger.error("Не удалось восстановить JSON. Возвращаем пустой объект.")
+            return {}
+            
     if not isinstance(data, dict):
         raise ValueError("Ожидался JSON-объект")
     return data
