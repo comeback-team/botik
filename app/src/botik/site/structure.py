@@ -540,6 +540,10 @@ def _component_valid(component: Any) -> bool:
         return False
     return True
 
+def _prune_block(block: dict[str, Any], model: type[BaseModel]) -> dict[str, Any]:
+    """Выкинуть ключи, которых нет в модели блока."""
+    allowed = set(model.model_fields.keys())
+    return {key: value for key, value in block.items() if key in allowed}
 
 def _repair_block(block: Any, business: str) -> dict[str, Any] | None:
     """Валидный блок вернуть как есть, дырявый подлатать, безнадёжный отбросить."""
@@ -548,19 +552,51 @@ def _repair_block(block: Any, business: str) -> dict[str, Any] | None:
     kind = block.get("type")
     if isinstance(kind, str):
         kind = kind.strip().lower()
-    if _BLOCK_MODELS.get(kind) is None:
+    
+    model = _BLOCK_MODELS.get(kind)
+    if model is None:
         return None
-    patched = dict(block)
-    if patched.get("type") != kind:
-        patched["type"] = kind
+        
+    # Используем _prune_block, чтобы выкинуть поля вроде header.title
+    patched = _prune_block(dict(block), model)
+    patched["type"] = kind
+    
     if kind == BlockType.INTERACTIVE and isinstance(patched.get("components"), list):
-        patched["components"] = [item for item in patched["components"] if _component_valid(item)]
+        # Чистим компоненты от мусора
+        pruned: list[Any] = []
+        for item in patched["components"]:
+            if not isinstance(item, dict):
+                continue
+            ctype = str(item.get("type", "")).strip().lower()
+            cmodel = _COMPONENT_MODELS.get(ctype)
+            if cmodel is None:
+                continue
+            candidate = _prune_block(dict(item), cmodel)
+            candidate["type"] = ctype
+            try:
+                cmodel.model_validate(candidate)
+            except ValidationError:
+                continue
+            pruned.append(candidate)
+        patched["components"] = pruned
+        
+    # Подставляем дефолты для отсутствующих полей
     for name, value in _default_fill(kind, business).items():
         if patched.get(name) in (None, "", []):
             patched[name] = value
+
     try:
-        _BLOCK_MODELS[kind].model_validate(patched)
+        model.model_validate(patched)
     except ValidationError:
+        # Если блок всё ещё невалиден, но он КРИТИЧЕСКИЙ — возвращаем "пустышку"
+        if kind in (BlockType.HEADER, BlockType.HERO, BlockType.FOOTER, BlockType.INTERACTIVE):
+            fallback = dict(_default_fill(kind, business))
+            fallback["type"] = kind
+            try:
+                model.model_validate(fallback)
+                return fallback
+            except ValidationError:
+                pass
         return None
     return patched
 
