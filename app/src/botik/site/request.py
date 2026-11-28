@@ -12,6 +12,7 @@ from pydantic import BaseModel
 
 from botik.site.schema import gigachat_schema
 from botik.site.structure import SiteStructure
+from botik.site.brief_parser import BriefRegistry
 
 SchemaMode = Literal["inline", "prompt"]
 
@@ -74,14 +75,15 @@ _SYSTEM = (
 )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(slots=True)
 class SiteRequest:
     """Промпт и схема, которые уходят в chat/completions."""
-
     system: str
     user: str
     response_format: dict[str, Any]
     output_model: type[BaseModel]
+    brief_registry: BriefRegistry      # ← новое
+    masked_brief: str                  # ← новое
 
 
 def build_site_request(brief: str, *, schema_mode: SchemaMode = "inline") -> SiteRequest:
@@ -92,7 +94,7 @@ def build_site_request(brief: str, *, schema_mode: SchemaMode = "inline") -> Sit
     и просит обычный json_object: так GigaChat отвечает, если json_schema
     он отклонил.
     """
-
+    
     text = brief.strip()
     if len(text) < 3:
         raise ValueError("Описание бизнеса слишком короткое")
@@ -106,11 +108,18 @@ def build_site_request(brief: str, *, schema_mode: SchemaMode = "inline") -> Sit
         response_format: dict[str, Any] = {"type": "json_object"}
     else:
         response_format = {"type": "json_schema", "schema": schema}
+
+    # Маскируем чувствительные данные
+    registry = BriefRegistry()
+    masked_brief = registry.mask(text)
+
     return SiteRequest(
         system=system,
-        user=_user_prompt(text),
+        user=_user_prompt(masked_brief),   # ← передаём маскированный
         response_format=response_format,
         output_model=SiteStructure,
+        brief_registry=registry,           # ← новое
+        masked_brief=masked_brief,         # ← новое
     )
 
 
@@ -147,44 +156,39 @@ def build_modify_request(
     instruction: str,
     *,
     schema_mode: SchemaMode = "inline",
+    registry: BriefRegistry | None = None,   # ← новое
 ) -> SiteRequest:
-    """Собрать запрос на модификацию существующей структуры сайта.
-    
-    Args:
-        current_structure: текущая структура сайта (dict)
-        instruction: инструкция от пользователя (что изменить)
-        schema_mode: "inline" или "prompt"
-    
-    Returns:
-        SiteRequest с промптом и схемой
-    """
     text = instruction.strip()
     if len(text) < 3:
         raise ValueError("Инструкция слишком короткая")
-    
+
     schema = gigachat_schema(SiteStructure)
     system = _system_prompt()
-    
     if schema_mode == "prompt":
         system += "\nJSON-СХЕМА:\n" + json.dumps(schema, ensure_ascii=False)
         response_format: dict[str, Any] = {"type": "json_object"}
     else:
         response_format = {"type": "json_schema", "schema": schema}
-    
-    # Добавляем в системный промпт инструкцию о модификации
+
     system += (
-        "\n\nЗАДАЧА: модифицировать существующую структуру сайта по инструкции пользователя. "
+        "\nЗАДАЧА: модифицировать существующую структуру сайта по инструкции пользователя. "
         "Сохрани все блоки, которые не нужно менять. "
         "Верни полную обновлённую структуру в формате JSON."
     )
-    
-    user = _modify_user_prompt(current_structure, text)
-    
+
+    # Маскируем инструкцию (если там есть новые {{img:...}} и т.п.)
+    reg = registry if registry is not None else BriefRegistry()
+    masked_instruction = reg.mask(text)
+
+    user = _modify_user_prompt(current_structure, masked_instruction)
+
     return SiteRequest(
         system=system,
         user=user,
         response_format=response_format,
         output_model=SiteStructure,
+        brief_registry=reg,
+        masked_brief=masked_instruction,
     )
 
 def _modify_user_prompt(current_structure: dict[str, Any], instruction: str) -> str:
