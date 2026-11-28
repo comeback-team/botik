@@ -121,8 +121,8 @@ class Graph:
         replies: tuple[str, ...],
     ) -> tuple[Dialogue, tuple[str, ...]]:
         try:
-            site = await asyncio.to_thread(self._generate, brief)
-            _publish(dialogue, site, self._content_dir, self._rules_dir, self._base_domain)
+            site, registry = await asyncio.to_thread(self._generate, brief)
+            _publish(dialogue, site, registry, self._content_dir, self._rules_dir, self._base_domain)
         except Exception:
             logger.exception("site build failed chat=%s", dialogue.chat_id)
             return dialogue, replies + (_FAILED,)
@@ -170,12 +170,13 @@ def _reserve(dialogue: Dialogue, content_dir: Path, rules_dir: Path, base_domain
 def _publish(
     dialogue: Dialogue,
     site: dict,
+    registry: dict,
     content_dir: Path,
     rules_dir: Path,
     base_domain: str | None,
 ) -> None:
     folder = folder_name(dialogue.host, dialogue.slug)
-    publish_html(site, content_dir=content_dir, folder=folder)
+    publish_html(site, registry, content_dir=content_dir, folder=folder)
     reserve_site(
         content_dir=content_dir,
         rules_dir=rules_dir,
@@ -185,10 +186,13 @@ def _publish(
     )
 
 
-def _generate(brief: str) -> dict:
+def _generate(brief: str) -> tuple[dict, dict]:
     request = build_site_request(brief)
     answer = complete(request.system, request.user, response_format=request.response_format)
-    return SiteStructure.model_validate(answer).model_dump()
+    import json
+    with open("t.json", "w") as F:
+        json.dump(answer, F, indent=4, sort_keys=True, ensure_ascii=False)
+    return answer, request.registry
 
 
 def _revise(current: dict, instruction: str) -> dict:

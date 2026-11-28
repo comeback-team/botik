@@ -101,6 +101,7 @@ def reserve_site(
 
 def publish_html(
     site: dict,
+    registry: dict,
     *,
     content_dir: Path,
     folder: str,
@@ -108,7 +109,7 @@ def publish_html(
     root = content_dir / folder
     root.mkdir(parents=True, exist_ok=True)
     path = root / "index.html"
-    path.write_text(render_instruction(site, site_id=folder), encoding="utf-8")
+    path.write_text(render_instruction(site, site_id=folder, registry=registry), encoding="utf-8")
     return path
 
 
