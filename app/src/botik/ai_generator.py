@@ -102,7 +102,6 @@ def _chat(system: str, user: str, response_format: dict[str, Any] | None) -> Cha
 
 def parse_json(raw: str) -> dict[str, Any]:
     """Достать объект из ответа: чистый JSON или блок ```json."""
-
     text = raw.strip()
     fenced = _JSON_FENCE.search(text)
     if fenced:
@@ -111,7 +110,26 @@ def parse_json(raw: str) -> dict[str, Any]:
         start, end = text.find("{"), text.rfind("}")
         if start != -1 and end > start:
             text = text[start : end + 1]
-    data = json.loads(text)
+
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as exc:
+        logger.warning("JSON от модели битый: %s. Пробуем восстановить...", exc)
+        
+        if not text.endswith("}"):
+            text += "}"
+        
+        open_braces = text.count("{")
+        close_braces = text.count("}")
+        if open_braces > close_braces:
+            text += "}" * (open_braces - close_braces)
+            
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError:
+            logger.error("Не удалось восстановить JSON. Возвращаем пустой объект.")
+            return {}
+            
     if not isinstance(data, dict):
         raise ValueError("Ожидался JSON-объект")
     return data
@@ -170,31 +188,26 @@ def modify_site(
     current_structure: dict[str, Any],
     instruction: str,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Модифицировать существующую структуру сайта по инструкции пользователя.
-
-    Returns:
-        Кортеж (новая_структура_dict, info): info["status"] — "ok" или "error",
-        при ошибке добавляются info["error"] и details для валидации.
-    """
-    # 1. Собираем запрос
     try:
+        # Возвращаемся к json_schema — это единственный поддерживаемый формат
         request = build_modify_request(current_structure, instruction)
     except ValueError as exc:
         logger.error("Ошибка сборки запроса на модификацию: %s", exc)
         return current_structure, {"status": "error", "error": str(exc)}
 
-    # 2. Идём в GigaChat (complete сам делает fallback json_schema → json_object)
     try:
         result = complete(
             request.system,
             request.user,
             response_format=request.response_format,
         )
+        # Защита от пустого ответа (та самая ошибка role: Field required)
+        if not result:
+            raise ValueError("Модель вернула пустой ответ. Попробуйте упростить инструкцию.")
     except Exception as exc:
         logger.error("Ошибка запроса к GigaChat: %s", exc)
         return current_structure, {"status": "error", "error": str(exc)}
 
-    # 3. Разбираем ответ (с автопочинкой)
     try:
         structure = parse_structure(result)
         return structure.model_dump(), {"status": "ok"}
