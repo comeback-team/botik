@@ -30,6 +30,7 @@ _COMPONENT_ID = r"^[a-z][a-z0-9_]{1,63}$"
 _ENDPOINT = r"^/[A-Za-z0-9_\-/]{1,120}$"
 _SUBMIT_ACTION = r"^[a-z][a-z0-9_]{1,79}$"
 _HTML_TAG = re.compile(r"</?\s*[a-zA-Z][^>]*>")
+_CURLY_BRACES = re.compile(r"\{[^}]*\}")  # {icon:clock}, {value:...} и т.д.
 
 
 class ComponentType(StrEnum):
@@ -67,6 +68,8 @@ class BlockType(StrEnum):
 def _reject_html(value: str) -> str:
     if _HTML_TAG.search(value):
         raise ValueError(f"HTML запрещён в A2UI: {value!r}")
+    # Чистим фигурные скобки — модель не должна генерить {icon}, {value}
+    value = _CURLY_BRACES.sub("", value)
     return value.strip()
 
 
@@ -191,13 +194,7 @@ class HeroBlock(BlockBase):
     title: str = Field(min_length=1, max_length=120)
     subtitle: str = Field("", max_length=240)
     cta_text: str = Field("Оставить заявку", max_length=40)
-    image_url: str = Field("", max_length=300)  # NEW
     highlights: list[str] = Field(default_factory=list, max_length=3)
-
-    @field_validator("image_url")  # NEW
-    @classmethod
-    def _image_clean(cls, value: str) -> str:
-        return _clean_image_url(value)
 
 
 class TextBlock(BlockBase):
@@ -224,12 +221,6 @@ class GalleryItem(BaseModel):
 
     caption: str = Field(max_length=80)
     alt: str = Field("", max_length=120)
-    image_url: str = Field("", max_length=300)  # NEW
-
-    @field_validator("image_url")  # NEW
-    @classmethod
-    def _image_clean(cls, value: str) -> str:
-        return _clean_image_url(value)
 
 
 class GalleryBlock(BlockBase):
@@ -509,7 +500,6 @@ def _default_fill(block_type: str, business: str) -> dict[str, Any]:
             "title": business,
             "subtitle": "",
             "cta_text": "Оставить заявку",
-            "image_url": "",
         },
         BlockType.TEXT: {
             "title": "О нас",
@@ -550,12 +540,10 @@ def _component_valid(component: Any) -> bool:
         return False
     return True
 
-
-def _prune_block(block: dict[str, Any], model: type[BaseModel]) -> dict[str, Any]:  # NEW
+def _prune_block(block: dict[str, Any], model: type[BaseModel]) -> dict[str, Any]:
     """Выкинуть ключи, которых нет в модели блока."""
     allowed = set(model.model_fields.keys())
     return {key: value for key, value in block.items() if key in allowed}
-
 
 def _repair_block(block: Any, business: str) -> dict[str, Any] | None:
     """Валидный блок вернуть как есть, дырявый подлатать, безнадёжный отбросить."""
@@ -564,13 +552,18 @@ def _repair_block(block: Any, business: str) -> dict[str, Any] | None:
     kind = block.get("type")
     if isinstance(kind, str):
         kind = kind.strip().lower()
+    
     model = _BLOCK_MODELS.get(kind)
     if model is None:
         return None
-    patched = _prune_block(dict(block), model)          # NEW — вырезаем лишние ключи
+        
+    # Используем _prune_block, чтобы выкинуть поля вроде header.title
+    patched = _prune_block(dict(block), model)
     patched["type"] = kind
+    
     if kind == BlockType.INTERACTIVE and isinstance(patched.get("components"), list):
-        pruned: list[Any] = []                          # NEW — чистим компоненты
+        # Чистим компоненты от мусора
+        pruned: list[Any] = []
         for item in patched["components"]:
             if not isinstance(item, dict):
                 continue
@@ -586,12 +579,24 @@ def _repair_block(block: Any, business: str) -> dict[str, Any] | None:
                 continue
             pruned.append(candidate)
         patched["components"] = pruned
+        
+    # Подставляем дефолты для отсутствующих полей
     for name, value in _default_fill(kind, business).items():
         if patched.get(name) in (None, "", []):
             patched[name] = value
+
     try:
         model.model_validate(patched)
     except ValidationError:
+        # Если блок всё ещё невалиден, но он КРИТИЧЕСКИЙ — возвращаем "пустышку"
+        if kind in (BlockType.HEADER, BlockType.HERO, BlockType.FOOTER, BlockType.INTERACTIVE):
+            fallback = dict(_default_fill(kind, business))
+            fallback["type"] = kind
+            try:
+                model.model_validate(fallback)
+                return fallback
+            except ValidationError:
+                pass
         return None
     return patched
 
