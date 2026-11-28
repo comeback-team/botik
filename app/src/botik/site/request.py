@@ -54,21 +54,13 @@ _SYSTEM = (
     "testimonials.items = {author, role, text, rating 1-5}; "
     "steps.items = {title, description} (3-5); team.items = {name, role, bio}; "
     "menu.items = {name, description, price (целое число)}, menu.currency — символ валюты.\n"
-    "6a. Форматы остальных блоков (соблюдай имена полей буквально): "
-    "header = {logo_text (1-60), menu[] (2-6)} — поля title у header НЕТ; "
-    "hero = {title, subtitle, cta_text, highlights[], image_url} — "
-    "поле кнопки называется cta_text, НЕ button_text; "
-    "footer = {email, phone, address, socials[]} — поля title у footer НЕТ; "
-    "text = {title, content}; cta = {title, subtitle, button_text}; "
-    "contacts = {title, phone, email, address, hours}; "
-    "faq.items = {question, answer}; features.items = {title, description}; "
-    "gallery.items = {caption, alt, image_url}.\n"
     "7. Тексты по-русски, продающие, конкретные, под бизнес из брифа. "
     "Тональность и цвета выбери сам под этот бизнес. Цвета — HEX #RRGGBB.\n"
     "8. Не выдумывай телефоны, адреса и URL картинок: пустые строки, если не даны.\n"
+    "8а. ЗАПРЕЩЕНО использовать фигурные скобки { } в любом тексте. "
+    "Никаких {icon}, {value}, {placeholder} — это ломает рендер. "
+    "Пиши обычный текст без спец-символов.\n"
     "9. variant — визуальный вариант из каталога. Не уверен — default.\n"
-    "11. Не добавляй поля, которых нет в описании выше. "
-    "Лишние поля ломают валидацию, и блок будет отброшен.\n"
     "ПРИМЕР interactive:\n"
     '{"type":"interactive","title":"Соберите пиццу","submit_action":"order_pizza",'
     '"components":[{"type":"select_options","id":"pizza_size","label":"Размер",'
@@ -129,10 +121,11 @@ def _system_prompt() -> str:
     token_rules = (
         "\n10. Чувствительные данные пользователя (ссылки на изображения, телефоны, "
         "email, адреса) замаскированы в брифе короткими метками <1>, <2>, <3>. "
-        "Скопируй метку В ТОЧНОСТИ (одним словом, без изменений) в поле image_url "
-        "(только hero и gallery.items) либо в phone/email/address. "
+        "Скопируй метку В ТОЧНОСТИ (одним словом, без изменений) в соответствующее "
+        "поле: image_url, phone, email, address. "
         "НИКОГДА не вставляй в JSON реальные ссылки и контакты — их у тебя нет. "
-        "Нет метки для поля — пустая строка."
+        "Нет метки для поля — пустая строка. "
+        'Пример: {"type":"hero","title":"...","image_url":"<1>"}.'
     )
     return (
         f"{_SYSTEM}\n"
@@ -149,7 +142,6 @@ def _user_prompt(brief: str) -> str:
         "Обязательно interactive с главным сценарием."
     )
 
-
 def build_modify_request(
     current_structure: dict[str, Any],
     instruction: str,
@@ -157,43 +149,43 @@ def build_modify_request(
     schema_mode: SchemaMode = "inline",
 ) -> SiteRequest:
     """Собрать запрос на модификацию существующей структуры сайта.
-
+    
     Args:
         current_structure: текущая структура сайта (dict)
         instruction: инструкция от пользователя (что изменить)
         schema_mode: "inline" или "prompt"
-
+    
     Returns:
         SiteRequest с промптом и схемой
     """
     text = instruction.strip()
     if len(text) < 3:
         raise ValueError("Инструкция слишком короткая")
-
+    
     schema = gigachat_schema(SiteStructure)
     system = _system_prompt()
-
+    
     if schema_mode == "prompt":
         system += "\nJSON-СХЕМА:\n" + json.dumps(schema, ensure_ascii=False)
         response_format: dict[str, Any] = {"type": "json_object"}
     else:
         response_format = {"type": "json_schema", "schema": schema}
-
+    
+    # Добавляем в системный промпт инструкцию о модификации
     system += (
         "\n\nЗАДАЧА: модифицировать существующую структуру сайта по инструкции пользователя. "
         "Сохрани все блоки, которые не нужно менять. "
         "Верни полную обновлённую структуру в формате JSON."
     )
-
+    
     user = _modify_user_prompt(current_structure, text)
-
+    
     return SiteRequest(
         system=system,
         user=user,
         response_format=response_format,
         output_model=SiteStructure,
     )
-
 
 def _modify_user_prompt(current_structure: dict[str, Any], instruction: str) -> str:
     """Сформировать пользовательский промпт для модификации."""
