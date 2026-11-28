@@ -47,11 +47,12 @@ def render_instruction(
     data: dict[str, Any],
     *,
     site_id: str,
-    registry: BriefRegistry,
+    registry: BriefRegistry | None = None,  # Разрешаем передавать None
 ) -> str:
-    """Собрать HTML из словаря, который вернула модель.
-    registry обязателен — без него маски <N> не заменятся на реальные данные."""
-    data = registry.resolve_tree(data)
+    """Собрать HTML из словаря, который вернула модель."""
+    
+    if registry is not None:
+        data = registry.resolve_tree(data)
     
     structure = parse_structure(_fill(data))
     return _render(structure, site_id=site_id)
