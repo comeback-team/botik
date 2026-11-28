@@ -117,6 +117,7 @@ def build_site_request(brief: str, *, schema_mode: SchemaMode = "inline") -> Sit
         user=_user_prompt(text),
         response_format=response_format,
         output_model=SiteStructure,
+        registry=registry, 
     )
 
 
