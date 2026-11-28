@@ -12,6 +12,7 @@ from pydantic import BaseModel
 
 from botik.site.schema import gigachat_schema
 from botik.site.structure import SiteStructure
+from botik.site.brief_parser import BriefRegistry
 
 SchemaMode = Literal["inline", "prompt"]
 
@@ -82,7 +83,7 @@ class SiteRequest:
     user: str
     response_format: dict[str, Any]
     output_model: type[BaseModel]
-
+    registry: BriefRegistry
 
 def build_site_request(brief: str, *, schema_mode: SchemaMode = "inline") -> SiteRequest:
     """Собрать запрос: системный промпт, бриф и structured output.
@@ -101,11 +102,16 @@ def build_site_request(brief: str, *, schema_mode: SchemaMode = "inline") -> Sit
 
     schema = gigachat_schema(SiteStructure)
     system = _system_prompt()
+    
     if schema_mode == "prompt":
         system += "\nJSON-СХЕМА:\n" + json.dumps(schema, ensure_ascii=False)
         response_format: dict[str, Any] = {"type": "json_object"}
     else:
         response_format = {"type": "json_schema", "schema": schema}
+
+    registry = BriefRegistry()
+    masked_brief = registry.mask(text)
+    
     return SiteRequest(
         system=system,
         user=_user_prompt(text),
@@ -180,11 +186,24 @@ def build_modify_request(
     
     user = _modify_user_prompt(current_structure, text)
     
+    masked_instruction = registry.mask(text)
+    masked_structure_str = registry.mask(json.dumps(current_structure, ensure_ascii=False))
+
+    user = (
+        f"Текущая структура сайта:\n```json\n"
+        f"{masked_structure_str}\n```\n\n"
+        f"Инструкция пользователя:\n\"\"\"{masked_instruction}\"\"\"\n\n"
+        "Измени структуру сайта согласно инструкции. "
+        "Сохрани все блоки, которые не нужно менять. "
+        "Верни полную обновлённую структуру в формате JSON."
+    )
+    
     return SiteRequest(
         system=system,
-        user=user,
+        user=_user_prompt(masked_brief), 
         response_format=response_format,
         output_model=SiteStructure,
+        registry=registry,   
     )
 
 def _modify_user_prompt(current_structure: dict[str, Any], instruction: str) -> str:
