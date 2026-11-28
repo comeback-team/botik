@@ -185,6 +185,8 @@ def build_modify_request(
     )
     
     user = _modify_user_prompt(current_structure, text)
+
+    registry = BriefRegistry()
     
     masked_instruction = registry.mask(text)
     masked_structure_str = registry.mask(json.dumps(current_structure, ensure_ascii=False))
